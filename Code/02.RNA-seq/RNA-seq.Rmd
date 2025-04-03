@@ -1,0 +1,761 @@
+---
+title: "DEG"
+author: "yinghong"
+date: "2024-04-17"
+output: html_document
+---
+
+## load packages
+```{r}
+library(biomaRt);library('rtracklayer');library(limma);library(edgeR)
+library(DESeq2);library("BiocParallel") ;library(tibble);library(ggplot2)
+library(pheatmap);library(ggrepel);library(psych);library(ComplexHeatmap)
+library(circlize);library(RColorBrewer);library(tidyr)
+library(reshape2) 
+library(pheatmap);library(data.table)
+library(org.Hs.eg.db) 
+library(clusterProfiler)
+library(dplyr) 
+library("IOBR");library(DOSE);library(pathview)
+library(enrichplot);library(tidyverse);library(ggstatsplot)
+
+# dir.create("../01.Data")
+# dir.create("../02.Code")
+# dir.create("../03.Output")
+
+```
+
+
+## rawdata processing
+```{r}
+dir.create("../03.Output/01.rawdata")
+
+rm(list=ls())
+
+exprSet_counts <- read.delim('../01.Data/HCC_rna_matrix_counts.txt', row.names = 1, sep = "", stringsAsFactors = FALSE, check.names = FALSE);dim(exprSet_counts);range(exprSet_counts) 
+
+exprSet_rpkm <- read.delim('../01.Data/HCC_rna_matrix_rpkm.txt', row.names = 1, sep = "", stringsAsFactors = FALSE, check.names = FALSE);dim(exprSet_rpkm);range(exprSet_rpkm) 
+
+apply(exprSet_rpkm, 2, sum) 
+
+rpkmTOtpm <- function(rpkm){
+  exp(log(rpkm) - log(sum(rpkm)) + log(1e6))
+} 
+exprSet_rpkm_to_tpm <- apply(exprSet_rpkm, 2, rpkmTOtpm)
+apply(exprSet_rpkm_to_tpm, 2, sum) 
+dim(exprSet_rpkm_to_tpm) 
+range(exprSet_rpkm_to_tpm) 
+write.csv(exprSet_rpkm_to_tpm,"../03.Output/01.rawdata/exprSet_rpkm_to_tpm.csv")
+
+# mart <- useMart(biomart = "ENSEMBL_MART_ENSEMBL", 
+#                 dataset = "hsapiens_gene_ensembl" 
+#                  # host = 'www.ensembl.org'
+#                 )
+# 
+# coding_genes <- biomaRt::getBM(attributes = c("external_gene_name","ensembl_gene_id","description", "chromosome_name","gene_biotype","transcript_biotype"), 
+#                         filters = "transcript_biotype",
+#                         values = 'protein_coding', 
+#                         mart = mart) ; dim(coding_genes) 
+# 
+exprSet_counts_coding <- exprSet_counts[which(rownames(exprSet_counts) %in% unique(coding_genes$external_gene_name)),];dim(exprSet_counts_coding)
+write.csv(exprSet_counts_coding,"../03.Output/01.rawdata/exprSet_counts_biomaRt.csv")
+
+exprSet_rpkm_coding <- exprSet_rpkm[which(rownames(exprSet_rpkm) %in% unique(coding_genes$external_gene_name)),];dim(exprSet_rpkm_coding) 
+write.csv(exprSet_rpkm_coding,"../03.Output/01.rawdata/exprSet_rpkm_biomaRt.csv")
+
+exprSet_rpkm_to_tpm_coding <- exprSet_rpkm_to_tpm[which(rownames(exprSet_rpkm_to_tpm) %in% unique(coding_genes$external_gene_name)),];dim(exprSet_rpkm_to_tpm_coding) 
+write.csv(exprSet_rpkm_to_tpm_coding,"../03.Output/01.rawdata/exprSet_tpm_biomaRt.csv")
+
+half_filter_genes <- function(genes){
+  genes[which(apply(genes,1,function(x){length(which(x!= 0))/length(x)})>= 0.5),]
+}
+
+exprSet_counts_coding_half <- half_filter_genes(exprSet_counts_coding);dim(exprSet_counts_coding_half) 
+exprSet_rpkm_coding_half <- half_filter_genes(exprSet_rpkm_coding);dim(exprSet_rpkm_coding_half) 
+exprSet_tpm_coding_half <- half_filter_genes(exprSet_rpkm_to_tpm_coding);dim(exprSet_tpm_coding_half) 
+exprSet_counts_coding_half_vst <- vst(as.matrix(round(exprSet_counts_coding_half))) ;dim(exprSet_counts_coding_half_vst) 
+
+
+sd_filter_genes <- function(genes, qt){
+  genes.sd <- transform(as.data.frame(genes), SD=apply(as.data.frame(genes),1,sd, na.rm = TRUE))
+  ## select top genes with high SD (~ variability) across samples
+  SD_quantile <- quantile(genes.sd$SD) ## identical to summary(genes.sd$SD)
+  SD_cutoff <- SD_quantile[qt] ## 2nd quantile -- 25th quantile.
+  genes.sd <- genes.sd[order(genes.sd$SD, decreasing = T),]
+  top.variable.genes <- rownames(genes.sd[genes.sd$SD > SD_cutoff,])
+  ## subset these genes from gene table
+  select <- which(rownames(genes) %in% top.variable.genes)
+  genes <- genes[select,]
+}
+
+exprSet_counts_coding_half_filt <- sd_filter_genes(exprSet_counts_coding_half,2);dim(exprSet_counts_coding_half_filt) 
+exprSet_rpkm_coding_half_filt <- sd_filter_genes(exprSet_rpkm_coding_half,2);dim(exprSet_rpkm_coding_half_filt)
+exprSet_tpm_coding_half_filt <- sd_filter_genes(exprSet_tpm_coding_half,2);dim(exprSet_rpkm_coding_half_filt) 
+exprSet_counts_coding_half_vst_filt <- sd_filter_genes(exprSet_counts_coding_half_vst,2);dim(exprSet_counts_coding_half_vst_filt) 
+
+metadata <- read.table("../01.Data/metadata_rna.txt",header=T,row.names = 1,sep="\t")
+metadata$ID <- rownames(metadata)
+unique(metadata$patientid) 
+metadata$Group1 <- factor(metadata$Group1,levels = c("Adjacent","Tumor"))
+
+stas <- table(metadata$patientid,metadata$Group1) %>% data.matrix  
+stas <- as.data.frame.matrix(stas)
+table(stas$Tumor)
+table(colnames(exprSet_counts_coding_half_filt) %in% rownames(metadata)) 
+write.csv(stas,"../stas.csv")
+
+########## 保存数据
+save(exprSet_counts,exprSet_rpkm,exprSet_rpkm_to_tpm,
+     exprSet_counts_coding,exprSet_rpkm_coding ,exprSet_rpkm_to_tpm_coding,
+     exprSet_counts_coding_half,exprSet_rpkm_coding_half,exprSet_tpm_coding_half,exprSet_counts_coding_half_vst,
+     exprSet_counts_coding_half_filt,exprSet_rpkm_coding_half_filt,exprSet_tpm_coding_half_filt,exprSet_counts_coding_half_vst_filt,
+     file = "../03.Output/01.rawdata/01.rawdata_coding_half_filt.Rdata")
+
+```
+
+### expr
+```{r}
+# 赋值
+load(file = "../03.Output/01.rawdata/01.rawdata_coding_half_filt.Rdata")
+
+# count
+expr_count <- exprSet_counts_coding_half_filt ; dim(expr_count) 
+# rpkm
+expr_rpkm <- exprSet_rpkm_coding_half_filt ; dim(expr_rpkm) 
+# tpm
+expr_tpm <- exprSet_tpm_coding_half_filt; dim(expr_tpm) 
+# vsd
+expr_vsd <- exprSet_counts_coding_half_vst_filt; dim(expr_vsd)
+
+save(expr_count,expr_rpkm,expr_tpm,expr_vsd,file="../03.Output/01.rawdata/01.expr_count_rpkm_tpm_vsd.Rdata")
+
+```
+
+# 1.metadat
+```{R}
+
+dir.create("../03.Output/04.IM_MO")
+
+### all
+metadata <- read.csv("../01.Data/metadata.csv",header = T,row.names = 1)  
+metadata$Sample1 <- factor(metadata$Sample1)
+rownames(metadata) <- metadata$Sample1
+
+### filt:IM MO MIX
+metadata_filt <- metadata[which(metadata$nodule1 %in% c("MO","MIX_MO","MIX_IM","IM")),]   
+metadata_filt$nodule1 <- factor(metadata_filt$nodule1,levels = c("MO","MIX_MO","MIX_IM","IM"))
+
+### mix
+metadata_mix <- metadata[which(metadata$nodule1 %in% c("MIX_MO","MIX_IM")),]  
+metadata_mix$nodule1 <- factor(metadata_mix$nodule1,levels = c("MIX_MO","MIX_IM"))
+
+### nodule:IM MO
+metadata_nodule <- metadata[which(metadata$nodule1 %in% c("MO","IM")),]   
+metadata_nodule$nodule1 <- factor(metadata_nodule$nodule1,levels = c("MO","IM"))
+
+### IM
+metadata_IM <- metadata[which(metadata$nodule1 %in% "IM"),]  
+
+### MO
+metadata_MO <- metadata[which(metadata$nodule1 %in% "MO"),]
+
+```
+
+# 2.Group
+```{r}
+
+### all
+metadata_rna <- metadata[which(rownames(metadata) %in% colnames(expr_count)),] 
+
+write.csv(metadata_rna,"../03.Output/04.IM_MO/metadata_rna_samples.csv") 
+
+### mix
+metadata_mix_rna <- metadata_mix[which(rownames(metadata_mix) %in% colnames(expr_count)),]
+write.csv(metadata_mix_rna,"../03.Output/04.IM_MO/metadata_mix_rna.csv") 
+
+### nodule:IM MO
+metadata_nodule_rna <- metadata_nodule[which(rownames(metadata_nodule) %in% colnames(expr_count)),]
+write.csv(metadata_nodule_rna,"../03.Output/04.IM_MO/metadata_nodule_rna.csv") 
+
+### IM
+metadata_IM_rna <- metadata_IM[which(rownames(metadata_IM) %in% colnames(expr_count)),]
+write.csv(metadata_IM_rna,"../03.Output/04.IM_MO/metadata_IM_rna.csv") 
+
+### MO
+metadata_MO_rna <- metadata_MO[which(rownames(metadata_MO) %in% colnames(expr_count)),]
+write.csv(metadata_MO_rna,"../03.Output/04.IM_MO/metadata_MO_rna.csv") #
+
+save(metadata_rna,metadata_mix_rna,metadata_nodule_rna,metadata_IM_rna,metadata_MO_rna,
+     file="../03.Output/04.IM_MO/metadata_rna.Rdata")
+
+load(file="../03.Output/04.IM_MO/metadata_rna.Rdata")
+
+```
+
+### EMT geneset
+```{r}
+# 
+EMT_genes_1184 <- read.table("../01.Data/EMT_genes_1184.txt",header = T,sep = "\t",quote = "")
+
+h.all_gmt <- read.gmt("../01.Data/gmt/h.all.v2023.1.Hs.symbols.gmt")
+
+head(h.all_gmt)
+
+geneset2 <- split(h.all_gmt$gene,h.all_gmt$term)
+View(geneset2)
+
+hall_emt <- geneset2[["HALLMARK_EPITHELIAL_MESENCHYMAL_TRANSITION"]]
+
+```
+
+# 3.IM_MO
+```{r}
+
+# load(file="../03.Output/01.rawdata/01.expr_count_rpkm_tpm_vsd.Rdata")
+
+expr_count_filt <- expr_count[,colnames(expr_count) %in% rownames(metadata_rna)] 
+
+expr_vsd_filt <- expr_vsd[,colnames(expr_vsd) %in% rownames(metadata_rna)] 
+
+expr_rpkm_filt <- expr_rpkm[,colnames(expr_rpkm) %in% rownames(metadata_rna)] 
+
+expr_tpm_filt <- expr_tpm[,colnames(expr_tpm) %in% rownames(metadata_rna)] 
+
+## count
+expr_count_filt_nodule <- expr_count_filt
+expr_count_filt_nodule <- expr_count_filt_nodule[,rownames(metadata_nodule_rna)]
+expr_count_filt_nodule <- expr_count_filt_nodule[complete.cases(expr_count_filt_nodule),] 
+
+expr_count_filt_IM <- expr_count_filt
+expr_count_filt_IM <- expr_count_filt_IM[,rownames(metadata_IM_rna)]
+expr_count_filt_IM <- expr_count_filt_IM[complete.cases(expr_count_filt_IM),] 
+
+expr_count_filt_MO <- expr_count_filt
+expr_count_filt_MO <- expr_count_filt_MO[,rownames(metadata_MO_rna)]
+expr_count_filt_MO <- expr_count_filt_MO[complete.cases(expr_count_filt_MO),] 
+
+expr_count_filt_mix<- expr_count_filt
+expr_count_filt_mix <- expr_count_filt_mix[,rownames(metadata_mix_rna)]
+expr_count_filt_mix <- expr_count_filt_mix[complete.cases(expr_count_filt_mix),] 
+
+expr_tpm_filt_nodule <- expr_tpm_filt
+expr_tpm_filt_nodule <- expr_tpm_filt_nodule[,rownames(metadata_nodule_rna)]
+expr_tpm_filt_nodule <- expr_tpm_filt_nodule[complete.cases(expr_tpm_filt_nodule),] 
+
+expr_tpm_filt_IM <- expr_tpm_filt
+expr_tpm_filt_IM <- expr_tpm_filt_IM[,rownames(metadata_IM_rna)]
+expr_tpm_filt_IM <- expr_tpm_filt_IM[complete.cases(expr_tpm_filt_IM),] 
+
+expr_tpm_filt_MO <- expr_tpm_filt
+expr_tpm_filt_MO <- expr_tpm_filt_MO[,rownames(metadata_MO_rna)]
+expr_tpm_filt_MO <- expr_tpm_filt_MO[complete.cases(expr_tpm_filt_MO),] 
+
+expr_vsd_filt_nodule <- expr_vsd_filt
+expr_vsd_filt_nodule <- expr_vsd_filt_nodule[,rownames(metadata_nodule_rna)]
+expr_vsd_filt_nodule <- expr_vsd_filt_nodule[complete.cases(expr_vsd_filt_nodule),] 
+
+expr_vsd_filt_IM <- expr_vsd_filt
+expr_vsd_filt_IM <- expr_vsd_filt_IM[,rownames(metadata_IM_rna)]
+expr_vsd_filt_IM <- expr_vsd_filt_IM[complete.cases(expr_vsd_filt_IM),] 
+
+expr_vsd_filt_MO <- expr_vsd_filt
+expr_vsd_filt_MO <- expr_vsd_filt_MO[,rownames(metadata_MO_rna)]
+expr_vsd_filt_MO <- expr_vsd_filt_MO[complete.cases(expr_vsd_filt_MO),] 
+
+
+save(expr_count_filt_nodule,expr_count_filt_IM,expr_count_filt_MO,expr_count_filt_mix,
+     expr_tpm_filt_nodule,expr_tpm_filt_IM,expr_tpm_filt_MO,
+     expr_vsd_filt_nodule,expr_vsd_filt_IM,expr_vsd_filt_MO,
+     file = "../03.Output/04.IM_MO/expr_nodule_IM_MO.Rdata")
+
+load(file = "../03.Output/04.IM_MO/expr_nodule_IM_MO.Rdata")
+
+```
+
+
+## deseq2_IMMO
+```{r}
+##DESeq2 
+library(DESeq2)
+
+## count_data
+metadata_diff <- metadata_nodule_rna
+table(metadata_diff$nodule1)
+
+exp <-exprSet_counts_coding[,rownames(metadata_nodule_rna)]  
+metadata_diff1 <- metadata_diff[rownames(metadata_diff) %in% colnames(exp),] #
+
+exp <-exprSet_counts_coding_half_filt[,rownames(metadata_nodule_rna)]
+metadata_diff1 <- metadata_diff[rownames(metadata_diff) %in% colnames(exp),] #
+
+if(T){
+  dds <- DESeqDataSetFromMatrix(countData = round(exp),
+                                colData = metadata_diff1,
+                                design = ~ nodule1 ) 
+}
+dim(dds) 
+
+dds$nodule1 <- relevel(dds$nodule1, ref = "MO")   
+head(assay(dds), 2)
+
+dds <- DESeq(dds,quiet = F)
+
+res <- results(dds,contrast=c("nodule1", "IM", "MO"))  
+res
+
+resOrdered <- res[order(res$padj),] 
+resOrdered
+tempDEG <- as.data.frame(resOrdered)
+DEG_DEseq2 <- na.omit(tempDEG)
+write.csv(DEG_DEseq2,"../03.Output/04.IM_MO/IMMO_DEG_DEseq2_original.csv",row.names = T)
+
+sum(res$padj < 0.1, na.rm=TRUE) 
+
+res05 <- results(dds, alpha=0.05)
+sum(res05$padj < 0.05, na.rm=TRUE) 
+```
+
+## volcano
+```{r}
+
+log2FC_cutoff = log2(2)
+padj_cutoff = 0.05
+
+need_DEG<- DEG_DEseq2[,c(2,6)] 
+need_DEG$significance  <- as.factor(ifelse(need_DEG$padj < padj_cutoff & abs(need_DEG$log2FoldChange) > log2FC_cutoff,
+                                           ifelse(need_DEG$log2FoldChange > log2FC_cutoff ,'UP','DOWN'),'NOT'))
+need_DEG$SYMBOL <- rownames(need_DEG)
+need_DEG<- need_DEG[order(need_DEG$log2FoldChange),] 
+table(need_DEG$significance)
+write.csv(need_DEG,"../03.Output/04.IM_MO/IMMO_need_DEG_original.csv",row.names = T)
+
+#提取差异结果
+result_significance_keep <- need_DEG[!need_DEG$significance=="NOT",] 
+write.csv(result_significance_keep,"../03.Output/04.IM_MO/result_significance_keep_IM_MO_original.csv")
+
+result_significance_up <- result_significance_keep[result_significance_keep$significance=="UP",]
+result_significance_down <- need_DEG[need_DEG$significance=="DOWN",]
+
+rownames(result_significance_up)[rownames(result_significance_up) %in% EMT_genes_1184$GeneSymbol]
+rownames(result_significance_up)[rownames(result_significance_up) %in% hall_emt]
+
+emt_genes_up <- unique(c(rownames(result_significance_up)[rownames(result_significance_up) %in% EMT_genes_1184$GeneSymbol],
+rownames(result_significance_up)[rownames(result_significance_up) %in% hall_emt]))
+
+result_significance_keep[result_significance_keep$significance=="DOWN",]$SYMBOL[result_significance_keep[result_significance_keep$significance=="DOWN",]$SYMBOL %in% EMT_genes_1184$GeneSymbol]
+
+###画火山图
+title <- paste0(' Up :  ',nrow(need_DEG[need_DEG$significance =='UP',]) ,
+                '\n Down : ',nrow(need_DEG[need_DEG$significance =='DOWN',]),
+                '\n FoldChange >= ',round(2^log2FC_cutoff,3))
+
+# top10sig <-need_DEG[c("MMP1","CXCL8" ,"LOX","POSTN","SPOCK1",
+#                       "AGR2","HOXB9","HOXA10","CEACAM6","SLC2A1"),]
+
+cols <- c("#5B9BD5","#DE6757")
+
+p <- ggplot(data=need_DEG[-1,], 
+            aes(x=log2FoldChange, y=-log10(padj), 
+                color=significance)) +
+  #点和背景
+  geom_point(alpha=0.9, size=0.1) +
+  theme_classic()+ #无网格线
+  #坐标轴
+  xlab("log2 ( FoldChange )") + 
+  ylab("-log10 ( P.adjust )") +
+  #标题文本
+  # ggtitle( title ) +
+  annotate("rect", xmin = 1.4, xmax =3.4, ymin = 8.0, ymax = 9,
+           alpha = .8,fill="#DE6757",color="black",linewidth = 0.2)+
+  annotate("rect", xmin = -1.4, xmax =-3.8, ymin = 8.0, ymax = 9,
+           alpha = .8,fill="#5B9BD5",color="black",linewidth = 0.2)+
+  
+  annotate('text', label = paste0("UP: ",nrow(need_DEG[need_DEG$significance =='UP',]), sep = ""),
+           x = 2.4, y = 8.5, size = 5,hjust = 0.5,color="black" ) +
+  annotate('text', label = paste0("Down: ", nrow(need_DEG[need_DEG$significance =='DOWN',]), sep = ""),
+           x = -2.6, y = 8.5, size = 5,hjust = 0.5,color="black") +
+              
+  scale_colour_manual(values = c("#5B9BD5",'grey',"#DE6757"))+ 
+
+  geom_vline(xintercept = c(-log2FC_cutoff,log2FC_cutoff),lty=4,col="grey",lwd=0.3) +
+  geom_hline(yintercept = -log10(padj_cutoff),lty=4,col="grey",lwd=0.3) +
+
+  geom_text_repel(data=top10sig,aes(x=log2FoldChange, y=-log10(padj),label=SYMBOL),
+                  force=20,color="black",
+                  size=3.5,
+                  point.padding = 0.5,hjust = 0.5,
+                  arrow = arrow(length = unit(0.01, "npc"),
+                                type = "open", ends = "last"),
+                  segment.color="black",
+                  segment.size=0.1,
+                  segment.alpha=0.8,
+                  min.segment.length = 0, seed = 42, box.padding = 0.5,
+                  nudge_x=0,
+                  nudge_y=0)+
+
+  theme( #plot.title = element_text(hjust = 0.5),
+    # panel.background=element_rect(fill="white"),
+    # panel.border = element_rect(fill=NA,size=0.2),
+    axis.line=element_line(size=0.2),   
+        plot.margin=unit(c(0.1,0,0.1,0.1),'lines'), #上右下左
+        legend.title = element_blank(), #不显示图例标题
+        legend.position="top",
+        axis.text.y =   element_text(color="black",size=12),
+        axis.text.x =   element_text(color="black",size=12),
+        axis.title =  element_text(size=14),
+        legend.text=element_text(color='black', size=12),
+        legend.key=element_blank(),
+        legend.key.height = unit(3, "pt"),
+        legend.key.width  = unit(3, "pt"),
+        )  #图例位置
+
+p
+
+ggsave(path="../03.Output/04.IM_MO", "/IM_MO_original.pdf",width = 5.4, height = 4.2)
+
+```
+
+
+## go
+```{r}
+
+hg<-bitr(result_significance_up$SYMBOL,   
+         fromType="SYMBOL",
+         toType=c("ENTREZID","ENSEMBL","SYMBOL"),
+         OrgDb="org.Hs.eg.db")  
+
+go <- enrichGO(hg$ENTREZID,
+               OrgDb = org.Hs.eg.db, 
+               ont='ALL',
+               pAdjustMethod = 'BH',
+               pvalueCutoff = 0.05, 
+               qvalueCutoff = 0.2,
+               keyType = 'ENTREZID')
+
+p_go <- dotplot(go,showCategory=20,font.size=15)	
+p_go
+ggsave(filename = '../03.Output/04.IM_MO/go_dotplot.pdf',width =6,height =4)
+
+```
+
+## KEGG
+```{r}
+#KEGG分析
+kegg <- enrichKEGG(gene= hg$ENTREZID,
+                   organism  = 'hsa',
+                   pAdjustMethod = "BH",
+                   pvalueCutoff = 0.05,
+                   qvalueCutoff = 0.2)	 
+
+
+p_kegg <- dotplot(kegg,font.size=15)	
+p_kegg 
+ggsave(filename = '../03.Output/04.IM_MO/kegg_dotplot.pdf',width =6,height =4)
+
+```
+
+## GSEA_kegg
+```{r}
+source("../02.Code/kegg_plot_function.R")
+
+# GSEA富集分析
+hg<-bitr(need_DEG$SYMBOL, 
+         fromType="SYMBOL",
+         toType=c("ENTREZID","SYMBOL"),
+         OrgDb="org.Hs.eg.db") 
+ENTREZID <- rep("NA",time = nrow(need_DEG))  #
+ENTREZID[match(hg$SYMBOL,need_DEG$SYMBOL)] <- hg$ENTREZID #
+need_DEG <- cbind(need_DEG,ENTREZID)
+geneList=need_DEG$log2FoldChange
+names(geneList)=need_DEG$ENTREZID
+geneList=sort(geneList,decreasing = T)
+
+kk_gse <- gseKEGG(geneList     = geneList,
+                  organism     = 'hsa',
+                  pvalueCutoff = 0.05,
+                  pAdjustMethod = "BH",
+                  verbose      = FALSE)
+
+kk_gse_cut <- kk_gse[kk_gse$pvalue<0.05 & kk_gse$p.adjust<0.2 & abs(kk_gse$NES)>1]
+kk_gse_cut_down <- kk_gse_cut[kk_gse_cut$NES < 0,]
+kk_gse_cut_up <- kk_gse_cut[kk_gse_cut$NES > 0,]
+
+down_gsea <- kk_gse_cut_down[tail(order(kk_gse_cut_down$NES,decreasing = T),10),]
+up_gsea <- kk_gse_cut_up[head(order(kk_gse_cut_up$NES,decreasing = T),10),]
+diff_gsea <- kk_gse_cut[head(order(abs(kk_gse_cut$NES),decreasing = T),10),]
+
+down_kegg <- kk_gse_cut_down[tail(order(kk_gse_cut_down$NES,decreasing = T),10),];down_kegg$group=-1
+up_kegg <- kk_gse_cut_up[head(order(kk_gse_cut_up$NES,decreasing = T),21),];up_kegg$group=1
+
+g2 = kegg_plot(up_kegg,down_kegg)
+g2
+
+```
+
+## GSEA_hallmark
+```{r}
+source("../02.Code/gsea_plot_function.R")
+
+h.all_gmt <- read.gmt("../01.Data/gmt/h.all.v2023.1.Hs.entrez.gmt")
+h.all_gmt$term <- gsub("HALLMARK_","",h.all_gmt$term)
+#预览转换格式后的gmt文件；
+head(h.all_gmt)
+
+need_DEG <- need_DEG[-1,]
+
+hg<-bitr(need_DEG$SYMBOL, 
+         fromType="SYMBOL",
+         toType=c("ENTREZID","SYMBOL"),
+         OrgDb="org.Hs.eg.db") 
+ENTREZID <- rep("NA",time = nrow(need_DEG))  #
+ENTREZID[match(hg$SYMBOL,need_DEG$SYMBOL)] <- hg$ENTREZID #
+need_DEG <- cbind(need_DEG,ENTREZID)
+geneList=need_DEG$log2FoldChange
+names(geneList)=need_DEG$ENTREZID
+geneList=sort(geneList,decreasing = T)
+
+h.all_res <- GSEA(geneList,TERM2GENE = h.all_gmt)
+
+head(h.all_res@result[1:10])
+
+h.all_gse_cut <- h.all_res[h.all_res$pvalue<0.05 & h.all_res$p.adjust<0.2 & abs(h.all_res$NES)>1]
+h.all_gse_cut_down <- h.all_gse_cut[h.all_gse_cut$NES < 0,]
+h.all_gse_cut_up <- h.all_gse_cut[h.all_gse_cut$NES > 0,]
+
+down_h.all <- h.all_gse_cut_down[tail(order(h.all_gse_cut_down$NES,decreasing = T),14),];down_h.all$group=-1
+up_h.all <- h.all_gse_cut_up[head(order(h.all_gse_cut_up$NES,decreasing = T),14),];up_h.all$group=1
+
+```
+
+### multiple pathway
+```{r}
+
+gsea_plot <- function(up_gsea,down_gsea){
+  dat=rbind(up_gsea,down_gsea)
+  colnames(dat)
+  dat$pvalue = -log10(dat$pvalue)
+  dat$pvalue=dat$pvalue*dat$group
+  dat=dat[order(dat$NES,decreasing = F),]
+  
+  g_gsea<- ggplot(dat, aes(x=reorder(Description,order(NES, decreasing = F)), y=NES, fill=qvalue)) + 
+    geom_bar(stat="identity") + 
+    scale_fill_gradient(low="#d6604d", high="#7D3C98") +
+    scale_x_discrete(name ="",
+                     breaks=c("EPITHELIAL_MESENCHYMAL_TRANSITION",
+                              "G2M_CHECKPOINT",
+                              "E2F_TARGETS",
+                              "MITOTIC_SPINDLE",
+                              "APICAL_JUNCTION",
+                              "ANGIOGENESIS",
+                              "INFLAMMATORY_RESPONSE",
+                              "FATTY_ACID_METABOLISM",
+                              "XENOBIOTIC_METABOLISM",
+                              "BILE_ACID_METABOLISM"),
+                     labels=c("Epithelial-mesenchymal transition",
+                              "G2M checkpoint",
+                              "E2F targets",
+                              "Mitotic spindle",
+                              "Apical junction",
+                              "Angiogenesis",
+                              "Inflammatory response",
+                              "Fatty acid metabolism",
+                              "Xenobiotic metabolism",
+                              "Bile acid metabolism"
+                     )) + #name ="Pathway names"
+    scale_y_continuous(name ="Normalized enrichment score") +
+    coord_flip() + 
+    theme_bw()+
+    ggtitle("Pathway Enrichment") +
+    theme( plot.title = element_text(hjust = 0.5,size=14),
+      # legend.title = element_blank(), 
+      # panel.background=element_rect(fill="white"),
+      panel.border = element_rect(fill=NA,size=0.2),
+      legend.position="right",
+      axis.line=element_line(size=0.2),
+      axis.text.y =   element_text(color="black",size=12),
+      axis.text.x =   element_text(color="black",size=12),
+      axis.title =  element_text(size=14),
+      axis.ticks =element_line(color='black', size=0.2),
+      axis.ticks.length=unit(0.05, "cm"),
+      legend.title=element_text(color='black', size=14),
+      legend.text=element_text(color='black', size=12),
+      # legend.key=element_blank(),
+      legend.key.height = unit(7, "pt"),
+      legend.key.width  = unit(7, "pt")
+    )  
+}
+
+g2 = gsea_plot(up_h.all,down_h.all)
+g2
+
+ggsave( "../03.Output/04.IM_MO/hall_gsea_IM_MO_original.pdf",width = 6.2, height = 2.8)
+
+```
+
+
+### single pathway
+```{r}
+
+i=1
+
+gseap1 <- gseaplot2(h.all_res,
+                    up_h.all$ID[i],
+                    title = up_h.all$Description[i],
+                    color = "red", 
+                    base_size = 5,
+                    rel_heights = c(1.5, 0.5, 1),
+                    subplots = 1:3,  
+                    ES_geom = "line",
+                    pvalue_table = T) 
+gseap1
+
+# 
+gseaScores <- getFromNamespace("gseaScores", "DOSE")
+
+# define function
+gsInfo <- function(object, geneSetID) {
+  geneList <- object@geneList
+  
+  if (is.numeric(geneSetID))
+    geneSetID <- object@result[geneSetID, "ID"]
+  
+  geneSet <- object@geneSets[[geneSetID]]
+  exponent <- object@params[["exponent"]]
+  df <- gseaScores(geneList, geneSet, exponent, fortify=TRUE)
+  df$ymin <- 0
+  df$ymax <- 0
+  pos <- df$position == 1
+  h <- diff(range(df$runningScore))/20
+  df$ymin[pos] <- -h
+  df$ymax[pos] <- h
+  df$geneList <- geneList
+  
+  df$Description <- object@result[geneSetID, "Description"]
+  return(df)
+}
+
+gsdata <- gsInfo(h.all_res, geneSetID = up_h.all$Description[1])
+
+
+gsdata1 <- gsdata %>%
+  mutate("gene_name" = need_DEG$SYMBOL) %>%
+  filter(position == 1)
+
+head(gsdata1,3)
+
+# colnames
+colnames(gsdata1)
+
+# plot
+pcurve <- ggplot(gsdata,aes(x = x,y = runningScore,color = runningScore)) +
+  geom_hline(yintercept = 0,size = 0.1,color = 'black',
+             lty = 'dashed') +
+  geom_line() +
+
+  theme_bw() +
+  ggtitle("Epithelial mesenchymal transition") +
+  scale_color_gradient(low = '#76BA99',high = '#EB4747') +
+  scale_x_continuous(expand = c(0,0)) +
+  # scale_y_continuous(expand = c(0,0)) +
+  theme(legend.position = 'none',
+        plot.title = element_text(size=14),
+        panel.border = element_rect(fill=NA,size=0.2),
+        axis.ticks.x = element_blank(),
+        axis.ticks.y=element_line(color='black', size=0.2),
+        axis.ticks.length.y = unit(0.05, "cm"),
+        axis.text.x = element_blank(),
+        axis.text.y = element_text(size=12),
+        axis.line.x = element_line(size=0.2),
+        axis.title.x = element_blank(),
+        axis.title.y = element_text(size=14),
+        legend.background = element_rect(fill = "transparent"),
+        plot.margin = margin(t = .1,r = .1, b = 0,l = .1,unit = "mm")) +
+  ylab('Running Enrichment Score')
+
+pcurve
+
+#
+pseg <- ggplot(gsdata,aes(x = x,y = runningScore)) +
+  geom_segment(data = gsdata1,
+               aes(x = x,xend = x,y = 0,yend = 1),
+               color = 'black',show.legend = F,linewidth=0.1) +
+  scale_x_continuous(expand = c(0,0)) +
+  scale_y_continuous(expand = c(0,0)) +
+  theme_bw() +
+  theme(panel.border = element_rect(fill=NA,size=0.2),
+        axis.ticks = element_blank(),
+        axis.text = element_blank(),
+        axis.title.y = element_blank(),
+        axis.title.x = element_text(size=14),
+        panel.grid = element_blank(),
+        axis.line.x = element_blank(),
+        plot.margin = margin(t = .1,r = .1, b = 0,l = .1,unit = "mm")) +
+  xlab('Rank in Ordered Dataset')
+
+pseg
+
+#
+v <- seq(1, sum(gsdata$position), length.out = 9)
+inv <- findInterval(rev(cumsum(gsdata$position)), v)
+if (min(inv) == 0) inv <- inv + 1
+
+col <- c(rev(brewer.pal(5, "Blues")), brewer.pal(5, "Reds"))
+
+ymin <- 0
+yy <- 0.3
+xmin <- which(!duplicated(inv))
+xmax <- xmin + as.numeric(table(inv)[as.character(unique(inv))])
+d <- data.frame(ymin = ymin, ymax = yy,
+                xmin = xmin,
+                xmax = xmax,
+                col = col[unique(inv)])
+
+pseg_ht <- pseg + geom_rect(
+  aes_(xmin = ~xmin,xmax = ~xmax,
+       ymin = ~ymin,ymax = ~ymax,
+       fill = ~I(col)),
+  data = d,
+  alpha = 0.8,
+  inherit.aes = FALSE)
+
+pseg_ht
+
+# add gene rank
+pseg_ht1 <- pseg_ht + xlab('') +
+  theme(axis.title.x = element_blank(),
+        plot.margin = margin(t = -.1,r = .1,b = 0,l = .1,unit = "mm"))
+pseg_ht1
+
+prank <- ggplot(gsdata,aes(x = x,y = geneList)) +
+  geom_col(width = 1,fill = 'grey80',color = NA) +
+  geom_hline(yintercept = 0,size = 0.1,color = 'black',
+             lty = 'dashed') +
+  theme_bw() +
+  theme(panel.grid = element_blank(),
+        panel.border = element_rect(fill=NA,size=0.2),
+        axis.line=element_line(size=0.2), 
+        axis.ticks=element_line(color='black', size=0.2),
+        axis.ticks.length = unit(0.05, "cm"),
+        axis.title.y = element_text(size=14),
+        axis.title.x = element_text(size=14),
+        axis.text.x = element_text(size=12),
+        axis.text.y = element_text(size=12),
+        plot.margin = margin(t = -.1,r = .1,b = .1,l = .1,unit = "mm")) +
+  coord_cartesian(expand = 0) +
+  ylab('Ranked List') +
+  xlab('Rank in Ordered Dataset')
+
+prank
+
+# combine
+pall <- aplot::plot_list(gglist = list(pcurve,pseg_ht1,prank),
+                         ncol = 1, heights = c(0.5,0.2,0.3))
+
+pall
+
+ggsave("../03.Output/04.IM_MO/GSEA_up_1_original;.pdf", width =3.4, height =3)
+
+```
+
+
+
