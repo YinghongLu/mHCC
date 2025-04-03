@@ -1,0 +1,786 @@
+---
+title: "Codex"
+author: "yinghong"
+date: "2025-02-20"
+output: html_document
+---
+
+# load packages
+```{r}
+library(Seurat) # v4.1.1
+library(tidyverse) # v1.3.2
+library(patchwork) # v1.1.2
+library(ggplot2) # v3.3.6
+library(dplyr) # v1.0.10
+library(circlize) # v0.4.16
+library(RColorBrewer) # v1.1-3
+library(pheatmap) # v1.0.12
+library(data.table) # v1.14.2
+library(reshape) # v0.8.9
+library(tidyr) # v1.2.1
+library(stringr) # v1.4.1
+library(Rphenograph) # v0.99.1
+library(ggpubr) # v0.4.0
+library(flowCore) # v2.8.0
+library(Rcpp) # v1.0.9
+library(cytofkit) # v0.99.0
+library(igraph) # v1.3.5
+library(ggthemes) # v4.2.4
+library(Rtsne) # v0.16
+library(cytofexplorer) # v2.05
+library(survival) # v3.4-0
+library(survminer) # v0.4.9
+library(sva)
+library(future)
+
+# dir.create("../01.Data")
+# dir.create("../02.Code")
+# dir.create("../03.Output")
+
+```
+
+# load markers
+```{r}
+Panel <- c("CD163", "CD15",  "CD11c", "CD56",  "CD45",  "FOXP3", "CD8","CD20",
+           "CD4" ,  "Ki67",  "CD31",  "CD94" , "SMA",   "CD3e",  "MPO", "CD68" ) #16
+
+CellMarkers_15 <- c("SMA","CD11c","CD20","CD3e","CD15", "CD163", "FOXP3","MPO",
+                    "CD56", "CD94" , "CD31","CD4","CD45","CD68","CD8") #15
+
+```
+
+# load raw data
+```{r}
+samples_list <- list.files(path = "D:/Project/mHCC_analysis/04.CODEX/01.Data", pattern = "\\.csv$",full.names = TRUE, recursive = FALSE)
+
+inputdata = lapply(samples_list, function(list_of_files) {
+
+  list_of_files = read_csv(list_of_files) %>%
+    column_to_rownames(var = "Object ID")%>%
+    mutate(sample_name = str_split(basename(list_of_files),'.csv', simplify =T)[,1])
+})
+
+inputdata_csd = lapply(inputdata, function(inputdata) {
+  inputdata = inputdata %>%
+    select(-contains("Phenotype")) %>%
+    select(contains("Cell"), -contains("DAPI"), -contains('Blank'), -contains('Empty')) %>%
+    select(contains("Mean")) %>%
+    rename_with(~str_remove_all(.x, ': Cell:')) %>%
+    rename_with(~str_remove_all(.x, '\\(.*\\) ')) %>%
+    rename_with(~str_remove_all(.x, ' Mean')) %>%
+    na.omit()
+  
+})
+
+csd = bind_rows(inputdata_csd)
+
+inputdata_raw = lapply(inputdata, function(inputdata) {
+  inputdata = inputdata %>%
+    select(-contains("Phenotype")) %>%
+    select(-contains(Panel))
+})
+
+# inputdata_raw[[7]]$`Nucleus: Circularity` = as.double(inputdata_raw[[7]]$`Nucleus: Circularity`)
+# inputdata_raw[[7]]$`Cell: Circularity` = as.double(inputdata_raw[[7]]$`Cell: Circularity`)
+
+csd_raw = bind_rows(inputdata_raw)
+
+save(csd,file="../03.Output/csd.RData")
+save(csd_raw,file="../03.Output/csd_raw.RData")
+
+rm(inputdata,inputdata_csd,inputdata_raw);gc()
+
+```
+
+## Filter
+```{r}
+
+identical(rownames(csd),rownames(csd_raw))
+DataFilter2 = csd
+
+DataFilter2$Cell.ID = rownames(DataFilter2)
+DataFilter2$rowsum = rowSums(DataFilter2[, 1:16])
+
+percentiles <- quantile(DataFilter2$rowsum, probs = c(0.01, 0.25, 0.50, 0.75, 0.99));print(percentiles)
+
+DataFilter2<- DataFilter2[DataFilter2$rowsum  >= percentiles[1] & DataFilter2$rowsum <= percentiles[5],]
+
+marker_thresholds <- apply(DataFilter2[, 1:16], 2, function(x) quantile(x, probs = 0.99))
+
+DataFilter2 <- DataFilter2[apply(DataFilter2[, 1:16], 1, function(cell) {
+  all(cell <= marker_thresholds)  # 判断每个细胞是否都在阈值以下
+}), ]
+
+FilterID = DataFilter2$Cell.ID
+save(FilterID, file = "../03.Output/FilterID/FilterID.RData")
+
+rm(list = ls());gc()
+
+```
+
+
+# Create the filtered original Seurat object
+```{r}
+load("../03.Output/csd.RData")
+load("../03.Output/csd_raw.RData")
+load("../03.Output/FilterID/FilterID.RData")
+
+csd_F <- csd [FilterID,]
+csd_raw_F <- csd_raw[FilterID,]
+
+t_csd_F <- t(as.matrix(csd_F))
+colnames(t_csd_F) <- rownames(csd_F)
+rownames(t_csd_F) <- colnames(csd_F)
+
+codex_F <- CreateSeuratObject(t_csd_F, project = "new", assay="CODEX") %>%
+  Seurat::NormalizeData(verbose = FALSE,normalization.method = NULL) %>%
+  ScaleData(verbose = FALSE)
+
+codex_F <- AddMetaData(codex_F,csd_raw_F$sample_name,col.name="sample_name")
+
+unique(codex_F$sample_name)
+Group <- sapply(codex_F$sample_name, function(x) strsplit(x, "_")[[1]][1])
+codex_F <- AddMetaData(object = codex_F,    
+                       metadata = Group,    
+                       col.name = "Group")  
+
+head(codex_F@meta.data)
+unique(codex_F$Group)
+
+save(codex_F, file = "../03.Output/FilterID/codex_F_FilterID.RData")
+
+```
+
+## UMAP
+```{r}
+codex_F <- RunPCA(codex_F, features=CellMarkers_15)
+codex_F <- RunUMAP(codex_F, method = "umap-learn", metric = "correlation", dims = 1:length(codex_F@reductions$pca))
+
+p = DimPlot(codex_F, reduction = "umap", group.by = "sample_name", order = rev(unique(codex_F@meta.data$sample_name))) ;p #+ NoLegend()
+pdf("../03.Output/FilterID/codex_F_FilterID_umap_merged.pdf", width = 6, height = 4)
+p
+dev.off()
+
+p = DimPlot(codex_F, reduction = "umap", group.by = "sample_name", split.by = "sample_name", ncol = 5,
+            order = rev(unique(codex_F@meta.data$sample_name))) + NoLegend();p
+pdf("../03.Output/FilterID2/codex_F_FilterID_umap_split.pdf", width = 8, height = 4)
+p
+dev.off()
+
+save(codex_F, file = "../03.Output/FilterID/codex_F_FilterID_umap.RData")
+
+```
+
+
+# Create the Seurat object removed batch effect with ComBat
+```{r}
+load( file = "../03.Output/FilterID/codex_F_FilterID_umap.RData")
+
+codex_F_com = codex_F
+
+dat = as.matrix(codex_F@assays$CODEX$counts)
+dat = as.data.frame(t(dat))
+dat$sample_name = codex_F@meta.data$sample_name
+
+edata <- t(as.matrix(dat[,1:16]))
+pheno <- subset(dat, select = "sample_name")
+combat_edata <- ComBat(dat = edata, batch = pheno$sample_name)
+
+dat_rbe = as.data.frame(t(combat_edata))
+dat_rbe = as.data.frame(cbind(pheno$sample_name,dat_rbe),stringsAsFactors = FALSE)
+colnames(dat_rbe)[1]="sample_name"
+
+codex_F_com@assays$CODEX$counts = t(as.matrix(dat_rbe[,2:17]))
+codex_F_com@assays$CODEX$data = t(as.matrix(dat_rbe[,2:17]))
+codex_F_com = ScaleData(codex_F_com)
+
+save(codex_F_com, file = "../03.Output/FilterID/codex_F_com_FilterID.RData")
+
+# rm(list = ls());gc()
+
+```
+
+## UMAP
+```{r}
+load(file = "../03.Output/FilterID/codex_F_com_FilterID.RData")
+
+codex_F_com <- RunPCA(codex_F_com, features=CellMarkers_15)
+codex_F_com <- RunUMAP(codex_F_com, method = "umap-learn", metric = "correlation", dims = 1:length(codex_F_com@reductions$pca))
+
+p = DimPlot(codex_F_com, reduction = "umap", group.by = "sample_name", order = rev(unique(codex_F_com@meta.data$sample_name))) ;p #+ NoLegend()
+pdf("../03.Output/codex_F_com_FilterID_umap_merged.pdf", width = 6, height = 4)
+p
+dev.off()
+
+p = DimPlot(codex_F_com, reduction = "umap", group.by = "sample_name", split.by = "sample_name", ncol = 5,
+            order = rev(unique(codex_F_com@meta.data$sample_name))) + NoLegend();p
+pdf("../03.Output/codex_F_com_FilterID_umap_split.pdf", width = 8, height = 4)
+p
+dev.off()
+
+save(codex_F_com, file = "../03.Output/FilterID/codex_F_com_FilterID_umap.RData")
+
+```
+
+
+## Cluster cells via PhenoGraph using the batch effect removed scale.data
+```{r}
+load(file = "../03.Output/FilterID/codex_F_com_FilterID_umap.RData")
+load(file = "../03.Output/FilterID/codex_F_com_FilterID_umap_scale_result_k20.RData")
+
+codex_F_com_phenograph.seurat = codex_F_com
+Idents(codex_F_com_phenograph.seurat) = PhenoGraph_codexFcom_scale_result_k20
+levels(codex_F_com_phenograph.seurat) = as.character(1:52) # to order the top annotation order of the following heatmap
+
+p = DoHeatmap(subset(codex_F_com_phenograph.seurat, downsample=100), slot = "scale.data", assay = "CODEX",
+              features = rownames(codex_F_com_phenograph.seurat), angle = 90, size = 4, disp.min = -2, disp.max = 2)+ NoLegend();p
+pdf("../03.Output/FilterID/codex_F_com_FilterID_umap_Celltype_AllMarkers_heatmap_100.pdf", width = 12, height = 7)
+p
+dev.off()
+
+p = DoHeatmap(subset(codex_F_com_phenograph.seurat, downsample=5000), slot = "scale.data", assay = "CODEX",
+              features = rownames(codex_F_com_phenograph.seurat), angle = 90, size = 4, disp.min = -2, disp.max = 2) + NoLegend();p
+pdf("../03.Output/FilterID/codex_F_com_FilterID_umap_Celltype_AllMarkers_heatmap_5000.pdf", width = 14, height = 7)
+p
+dev.off()
+
+p = DoHeatmap(subset(codex_F_com_phenograph.seurat, downsample=50000), slot = "scale.data", assay = "CODEX",
+              features = rownames(codex_F_com_phenograph.seurat), angle = 90, size = 4, disp.min = -2, disp.max = 2) + NoLegend();p
+pdf("../03.Output/FilterID/codex_F_com_FilterID_umap_Celltype_AllMarkers_heatmap_50000.pdf", width = 18, height = 7)
+p
+dev.off()
+
+```
+
+## Cell type
+```{r}
+load(file = "../03.Output/FilterID/codex_F_com_FilterID_umap.RData")
+load(file = "../03.Output/FilterID/codex_F_com_FilterID_umap_scale_result_k20.RData")
+
+codex_F_com_phenograph <- as.matrix(codex_F_com@assays$CODEX$scale.data)
+
+codex_F_com_phenograph.seurat = codex_F_com
+Idents(codex_F_com_phenograph.seurat) = PhenoGraph_codexFcom_scale_result_k20
+levels(codex_F_com_phenograph.seurat) = as.character(1:52) # to order the top annotation order of the following heatmap
+
+new.cluster.ids <- c("MDSC",#1 
+                     "TAM",#2 
+                     "Unidentified",#3
+                     "Unidentified",#4
+                     "Endothelial cells",#5
+                     "Unidentified",#6
+                     "Mix immune",#7
+                     "Unidentified",#8 
+                     "Mix immune",#9 
+                     "Unidentified",#10
+                     "Treg",#11
+                     "MDSC",#12
+                     "Mix immune",#13
+                     "Fibroblasts",#14
+                     "Mix immune",#15
+                     "CD8+ T cells",#16
+                     "Fibroblasts",#17
+                     "Endothelial cells",#18
+                     "Dendritic cells",#19
+                     "Unidentified",#20
+                     "CD4+ T cells",#21
+                     "Endothelial cells",#22
+                     "Unidentified",#23
+                     "Unidentified",#24
+                     "Unidentified",#25
+                     "Unidentified",#26
+                     "B cells",#27
+                     "Unidentified",#28
+                     "Treg",#29
+                     "TAM",#30
+                     "Unidentified",#31
+                     "Unidentified",#32
+                     "Unidentified",#33
+                     "Unidentified",#34
+                     "Unidentified",#35
+                     "Unidentified",#36
+                     "Unidentified",#37
+                     "Mix immune",#38
+                     "Unidentified",#39
+                     "Unidentified",#40
+                     "Unidentified",#41
+                     "Mix immune",#42
+                     "Unidentified",#43
+                     "Unidentified",#44
+                     "Mix immune",#45
+                     "Unidentified",#46
+                     "Unidentified",#47 
+                     "Unidentified",#48 
+                     "Unidentified",#49 
+                     "Unidentified",#50
+                     "Unidentified",#51
+                     "Mix immune"#52
+                     # "Tumor cells",#53
+                     # "Tumor cells",#54
+                     # "Tumor cells"#55
+)
+
+names(new.cluster.ids) <- levels(codex_F_com_phenograph.seurat)
+codex_F_com_phenograph.seurat <- RenameIdents(codex_F_com_phenograph.seurat, new.cluster.ids)
+codex_F_com_phenograph.seurat@meta.data$cluster =  PhenoGraph_codexFcom_scale_result_k20
+
+codex_F_com_phenograph.seurat@meta.data$cellid <- rownames(codex_F_com_phenograph.seurat@meta.data)
+codex_F_com_phenograph.seurat@meta.data$celltype = "Unidentified"
+codex_F_com_phenograph.seurat@meta.data$celltype = Idents(codex_F_com_phenograph.seurat)
+
+codex_F_com@meta.data$celltype = codex_F_com_phenograph.seurat$celltype
+codex_F_com@meta.data$clusters = codex_F_com_phenograph.seurat$cluster
+
+Idents(codex_F_com) = codex_F_com@meta.data$celltype
+
+```
+
+### boxplot + barplot
+```{r}
+table(codex_F_com@meta.data$Group)
+table(codex_F_com@meta.data$celltype,codex_F_com@meta.data$Group)
+
+data <- codex_F_com@meta.data %>% as.data.frame()
+sample_count <- table(data$sample_name) %>% as.data.frame()
+sample_cell <- table(data$sample_name,data$celltype)  %>% data.frame()
+
+sample_cell <- sample_cell%>%
+  pivot_wider(names_from = Var2, values_from = Freq) %>%
+  tibble::column_to_rownames(var="Var1")
+
+sample_cell_non_immune <- sample_cell[,c("Unidentified","Endothelial cells","Fibroblasts")]
+
+sample_cell_non_immune$rowsum <- rowSums(sample_cell_non_immune)
+
+sample_cell_non_immune[,1:3] <- sample_cell_non_immune[,1:3]/sample_cell_non_immune$rowsum *100
+
+sample_cell_non_immune <- sample_cell_non_immune %>% select(-c("rowsum"))%>%
+  tibble::rownames_to_column(var="Sample_name")
+
+sample_cell_non_immune <- sample_cell_non_immune %>%
+  pivot_longer(
+    cols = -`Sample_name`,        
+    names_to = "Cell type", 
+    values_to = "Value"       
+  )
+
+p <- ggplot(sample_cell_non_immune, aes(x = `Sample_name`, y = Value, fill = `Cell type`)) +
+  geom_bar(stat = "identity", position = "stack", width = 0.6) +
+
+  labs(x = NULL, y = "Non-immune", title = "Cellular compositions in each specimens") +
+
+  scale_fill_manual(values =c("Unidentified"="lightgrey", 
+                              "Fibroblasts"="#ffb74d",
+                              "Endothelial cells"="#e6755b"
+  ))+
+
+  theme_minimal(base_size = 14) +
+  theme( 
+    panel.border = element_rect(fill=NA,color="black", size=1, linetype="solid"),
+    axis.text.x = element_text(angle = 45, hjust = 1,size=12,color="black"),
+    axis.text.y = element_text(size=12,color="black"),
+    axis.legend.x = element_text(angle = 45, hjust = 1,size=14,color="black"),
+    axis.legend.y = element_text(angle = 45, hjust = 1,size=14,color="black"),
+     plot.title = element_text(hjust = 0.5,size=14),
+    legend.title=element_text(color='black', size=14),
+    legend.text=element_text(color='black', size=12),
+    panel.grid.major.x = element_blank()
+  ) ;p
+
+pdf("../03.Output/FilterID/codex_F_com_FilterID_F_Proportions_barplot_patient_non_immune.pdf", width = 6, height = 3)
+p
+dev.off()
+
+```
+
+####  immune cell
+```{r}
+
+sample_cell_immune <- sample_cell %>%
+  select(-c(Unidentified, `Endothelial cells`, Fibroblasts))
+
+sample_cell_immune$rowsum <- rowSums(sample_cell_immune)
+
+sample_cell_immune[,1:8] <- sample_cell_immune[,1:8]/sample_cell_immune$rowsum *100
+
+sample_cell_immune <- sample_cell_immune %>% select(-c("rowsum"))%>%
+  tibble::rownames_to_column(var="Sample_name")
+
+sample_cell_immune <- sample_cell_immune %>%
+  pivot_longer(
+    cols = -`Sample_name`,        
+    names_to = "Cell type", 
+    values_to = "Value"         
+  )
+
+sample_cell_immune$`Cell type` <- factor(sample_cell_immune$`Cell type`,levels = c("MDSC",
+                                                                       "B cells",
+                                                                       "CD4+ T cells",
+                                                                       "CD8+ T cells",
+                                                                       "Dendritic cells",
+                                                                       
+                                                                       "TAM",
+                                                                       "Treg",
+                                                                       "Mix immune"))
+
+colors <- brewer.pal(7, "Set2")  
+# "#E41A1C" "#377EB8" "#4DAF4A" "#984EA3" "#FF7F00" "#FFFF33" "#A65628" "#F781BF" "#999999"
+#  "#66C2A5" "#FC8D62" "#8DA0CB" "#E78AC3" "#A6D854" "#FFD92F" "#E5C494" "#B3B3B3"
+#  "#A6CEE3" "#1F78B4" "#B2DF8A" "#33A02C" "#FB9A99" "#E31A1C" "#FDBF6F" "#FF7F00" "#CAB2D6"
+
+colors <- c(colors, "lightgray")
+
+p <- ggplot(sample_cell_immune, aes(x = `Sample_name`, y = Value, fill = `Cell type`)) +
+  geom_bar(stat = "identity", position = "stack", width = 0.6) +
+
+  labs(x = NULL, y = "Immune", title = "Cellular compositions in each specimens") +
+  
+  scale_fill_manual(values =c("Mix immune"="lightgray",
+                              "B cells"="#66C2A5",
+                              "CD4+ T cells"="#FC8D62",
+                              "CD8+ T cells"="#8DA0CB",
+                              "Dendritic cells"="#E78AC3",
+                              "MDSC"="#A6D854",
+                              "TAM"="#FFD92F",
+                              "Treg"="#A6CEE3" 
+  ))+
+
+  theme_minimal(base_size = 14) +
+  theme( 
+    panel.border = element_rect(fill=NA,color="black", size=1, linetype="solid"),
+    axis.text.x = element_text(angle = 45, hjust = 1,size=12,color="black"),
+    axis.text.y = element_text(size=12,color="black"),
+    axis.legend.x = element_text(angle = 45, hjust = 1,size=14,color="black"),
+    axis.legend.y = element_text(angle = 45, hjust = 1,size=14,color="black"),
+     plot.title = element_text(hjust = 0.5,size=14),
+    legend.title=element_text(color='black', size=14),
+    legend.text=element_text(color='black', size=12),
+    panel.grid.major.x = element_blank()
+  ) ;p
+
+pdf("../03.Output/FilterID/codex_F_com_FilterID_F_Proportions_barplot_patient_immune.pdf", width = 6, height = 3)
+p
+dev.off()
+
+sample_cell_immune$Group <- sapply(sample_cell_immune$Sample_name, function(x) strsplit(x, "_")[[1]][1])
+
+p <- ggplot(sample_cell_immune[!sample_cell_immune$`Cell type`=="Mix immune",], aes(x = `Cell type`, y = Value, color = Group)) +
+  geom_boxplot(outlier.shape = NA, position = position_dodge(0.8), width = 0.6) +
+  geom_jitter(position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.8), size = 1.5, alpha = 0.7) +
+  
+  stat_compare_means(aes(group = Group), method = "wilcox.test", label = "p.format", size = 3,
+                     position = position_nudge(y = 2)) +
+
+  labs(x = "Cell Type", y = "% of CD45+", title = "Proportions of immune cells in each group") +
+  
+  theme_minimal(base_size = 14) +
+  theme( 
+    panel.border = element_rect(fill=NA,color="black", size=1, linetype="solid"),
+    axis.text.x = element_text(angle = 45, hjust = 1,size=12,color="black"),
+    axis.text.y = element_text(size=12,color="black"),
+    axis.legend.x = element_text(angle = 45, hjust = 1,size=14,color="black"),
+    axis.legend.y = element_text(angle = 45, hjust = 1,size=14,color="black"),
+     plot.title = element_text(hjust = 0.5,size=14),
+    legend.title=element_text(color='black', size=14),
+    legend.text=element_text(color='black', size=12),
+    panel.grid.major.x = element_blank()
+  ) +
+
+  scale_color_manual(values = c("IM" = "#D55E00", "MO" = "#0072B2"));p
+
+pdf("../03.Output/FilterID/codex_F_com_FilterID_F_Proportions_boxplot_with_p.pdf", width = 6, height = 4)
+p
+dev.off()
+
+p <- ggplot(sample_cell_immune[!sample_cell_immune$`Cell type`=="Mix immune",], aes(x = `Cell type`, y = Value, color = Group)) +
+  geom_boxplot(outlier.shape = NA, position = position_dodge(0.8), width = 0.6) +
+  geom_jitter(position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.8), size = 1.5, alpha = 0.7) +
+  
+  # stat_compare_means(aes(group = Group), method = "wilcox.test", label = "p.format", size = 3,
+  #                    position = position_nudge(y = 2)) +
+  
+  labs(x = "Cell Type", y = "% of CD45+", title = "Proportions of immune cells in each group") +
+  
+  theme_minimal(base_size = 14) +
+  theme( 
+    panel.border = element_rect(fill=NA,color="black", size=1, linetype="solid"),
+    axis.text.x = element_text(angle = 45, hjust = 1,size=12,color="black"),
+    axis.text.y = element_text(size=12,color="black"),
+    axis.legend.x = element_text(angle = 45, hjust = 1,size=14,color="black"),
+    axis.legend.y = element_text(angle = 45, hjust = 1,size=14,color="black"),
+     plot.title = element_text(hjust = 0.5,size=14),
+    legend.title=element_text(color='black', size=14),
+    legend.text=element_text(color='black', size=12),
+    panel.grid.major.x = element_blank()
+  ) +
+  
+  scale_color_manual(values = c("IM" = "#D55E00", "MO" = "#0072B2"));p
+
+pdf("../03.Output/FilterID/codex_F_com_FilterID_F_Proportions_boxplot_without_p.pdf", width = 6, height = 3)
+p
+dev.off()
+
+
+```
+
+
+## Cell type filter
+```{r}
+#### Delete Unidentified cells and cells in  regions with poor quality ####
+# Second round QC, pick passed cells to proceed following analysis
+UnidentifiedCellID = WhichCells(codex_F_com,
+                                idents = c("Unidentified","Mix immune"))
+
+DeletedCellID = unique(c(UnidentifiedCellID))
+
+codex_F_com_F = subset(codex_F_com,
+                       cells = DeletedCellID,
+                       invert = TRUE)
+
+codex_F_com_F = ScaleData(codex_F_com_F)
+
+codex_F_com_F <- RunPCA(codex_F_com_F, features=CellMarkers_15)
+codex_F_com_F <- RunUMAP(codex_F_com_F, method = "umap-learn", metric = "correlation", dims = 1:length(codex_F_com_F@reductions$pca))
+
+save(codex_F_com_F,file = "../03.Output/FilterID/codex_F_com_FilterID_F.RData")
+
+```
+
+### umap
+```{r}
+####
+load(file = "../03.Output/FilterID/codex_F_com_FilterID_F.RData")
+
+unique(codex_F_com_F$sample_name)
+Group <- sapply(codex_F_com_F$sample_name, function(x) strsplit(x, "_")[[1]][1])
+codex_F_com_F <- AddMetaData(object = codex_F_com_F,     
+                           metadata = Group,    
+                           col.name = "Group")  
+
+head(codex_F_com_F@meta.data)
+unique(codex_F_com_F$Group)
+
+unique(codex_F_com_F$celltype)
+
+cols=c("#66C2A5","#FC8D62","#8DA0CB","#E78AC3","#A6D854","#FFD92F","#A6CEE3","#ffb74d","#e6755b")
+orders = c("B cells","CD4+ T cells","CD8+ T cells","Dendritic cells","MDSC","TAM","Treg","Fibroblasts","Endothelial cells")
+
+
+pal<-colorRampPalette(cols)
+image(x=1:9,y=1,z=as.matrix(1:9),col=pal(9))
+
+# Modify the UMAP of codex_F_com_F with defined cell types. Sample 1/500 for each cell type.
+subset_list = list()
+downsample_cycle = round(table(Idents(codex_F_com_F))/500,0)
+for (i in 1:9) {
+  temp = subset(codex_F_com_F, idents = names(downsample_cycle)[i])
+  subset_list[[i]] = subset(temp, downsample = downsample_cycle[i])
+}
+
+codex_F_com_F_subset_sample_prob = merge(x = subset_list[[1]], y = unlist(subset_list)[2:9], merge.data = T) # no scale data
+codex_F_com_F_subset_sample_prob = subset(codex_F_com_F, cells = colnames(codex_F_com_F_subset_sample_prob))
+
+p = DimPlot(codex_F_com_F_subset_sample_prob, 
+        reduction = "umap", 
+        group.by = "celltype",
+        label = T, 
+        repel = T,
+        cols = cols,
+        order = rev(orders),
+        pt.size = 0.1) + NoLegend()+
+    theme(
+    axis.title = element_text(size = 14),       
+    axis.text = element_text(size = 12),        
+    plot.title = element_text(size = 14),      
+    legend.text = element_text(size = 12),      
+    legend.title = element_text(size = 14)      
+  );p
+pdf("../03.Output/FilterID/codex_F_com_FilterID_F_Celltype_Umap_Merged.pdf", width = 4, height = 4)
+p
+dev.off()
+
+p = DimPlot(codex_F_com_F_subset_sample_prob, 
+            reduction = "umap", 
+            group.by = "celltype",
+            label = FALSE, 
+            repel = T,
+            cols = cols,
+            order = rev(orders),
+            split.by = "celltype",
+            ncol = 4,
+            pt.size = 0.4) + NoLegend();p
+
+pdf("../03.Output/FilterID_/codex_F_com_FilterID_F_Celltype_Umap_Split.pdf", width = 13, height = 8)
+p
+dev.off()
+
+DotPlot(codex_F_com_F,
+        features = CellMarkers_15, 
+        cols = c("lightgray", "blue"),  
+        dot.scale = 8,           
+        group.by = "celltype"       
+) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  labs(title = "Bubble Plot of Gene Expression")
+
+
+```
+
+### dotplot
+```{r}
+# Modify the HEATMAP of codex_F_com_F with defined cell types. Sample 5000 for each cell type.
+temp_subset = subset(codex_F_com_F, features = CellMarkers_15)
+temp_subset = subset(temp_subset, downsample=7000)
+
+dt <- codex_F_com@assays$CODEX$scale.data #这里以Top5上调为例
+dtt <- expm1(dt)
+
+dt_list <- lapply(unique(codex_F_com_F$celltype), FUN = function(x){
+  cellid <- colnames(codex_F_com_F)[which(codex_F_com_F$celltype == x)]
+  data_cluster <- dtt[,cellid]
+  return(data_cluster)
+})
+names(dt_list) <- unique(codex_F_com_F$celltype)
+
+dt_sum <- list()
+for(i in 1:length(dt_list)){
+  means <- log1p(rowMeans(dt_list[[i]])) 
+  pro <- apply(dt_list[[i]], 1, FUN = function(x){
+    pro <- sum(x > 0.5)/length(x)
+  })
+  
+  gene <- factor(rownames(dt_list[[i]]), levels = CellMarkers_15)
+  celltype <- rep(names(dt_list)[i], nrow(dt_list[[i]]))
+  stat <- data.frame(gene, celltype, means, pro)
+  dt_sum[[i]] <- stat
+}
+
+dot_dt <- do.call("rbind", dt_sum)
+head(dot_dt)
+
+dot_scale <- lapply(CellMarkers_15, FUN = function(x){
+  dt1 <- dot_dt[which(dot_dt$gene == x),]
+  dt1$scale <- as.vector(scale(dt1$means))
+  return(dt1)
+})
+
+dot_dt <- do.call("rbind", dot_scale)
+head(dot_dt) 
+
+dot_dt$celltype <- factor(dot_dt$celltype,
+                          # levels = c('Naive CD4 T','Memory CD4 T',
+                          #            'CD14+ Mono','B','CD8 T','FCGR3A+ Mono',
+                          #            'NK','DC','Platelet')
+                          )
+
+#ggplot2绘图：
+p1 <- ggplot(dot_dt, aes(x = celltype, y = gene)) + 
+  geom_point(aes(size = pro, color = scale)) 
+p1
+
+col_fun = circlize::colorRamp2(c(-0.8, 0, 2), c('#5E3C99', "white", '#E66101')) 
+
+#图表个性化调整:
+p2 <- p1 +
+  scale_size_continuous(range = c(2,6)) + #气泡大小范围调整
+  # scale_color_gradient2(low='#5E3C99', high='#E66101', mid = 'white') + 
+  scale_color_gradientn(colors = col_fun(seq(-1, 2, length.out = 100))) +  
+  theme_classic() +
+  theme(legend.text = element_text(size = 12,color = "black"), 
+        legend.title = element_text(size = 14,color = "black"),
+        axis.text = element_text(size = 12,color = "black"), 
+        axis.title = element_text(size = 14,color = "black"), 
+        axis.text.x = element_text(angle = 90, vjust = 0.5,hjust = 1)) +
+  labs(x = 'Identity',y = 'Features', #xy轴标题修改
+       color = 'Average Expression', size = 'Percent Expressed') + 
+  coord_flip() #坐标轴翻转
+p2
+
+pdf("../03.Output/FilterID/codex_F_com_FilterID_F_dotplot.pdf", width =7, height = 4)
+p2
+dev.off()
+
+
+```
+
+
+
+### heatmap
+```{r}
+# Modify the HEATMAP of codex_F_com_F with defined cell types. Sample 5000 for each cell type.
+temp_subset = subset(codex_F_com_F, features = CellMarkers_15)
+temp_subset = subset(temp_subset, downsample=7000)
+
+temp_subset = ScaleData(temp_subset)
+
+toplot_heatmap = temp_subset@assays$CODEX$scale.data
+
+annotation_col = as.data.frame(temp_subset@meta.data)
+annotation_col = subset(annotation_col, select = "celltype")
+annotation_col = data.frame(cellid = rownames(annotation_col),
+                            celltype = annotation_col$celltype)
+
+
+annotation_col$celltype <- factor(annotation_col$celltype,levels = c(  "B cells",
+                                                                       "Endothelial cells",
+                                                                       "MDSC",
+                                                                       "CD4+ T cells",
+                                                                       "Fibroblasts",
+                                                                       "CD8+ T cells",
+                                                                       "Dendritic cells",
+                                                                       "Treg",
+                                                                       "TAM"
+                                                                       
+                                                                       ))
+
+col_fun = circlize::colorRamp2(c(-2, 0, 2), c("#6EC388", "white", "#C82033")) 
+
+library(ComplexHeatmap)
+ha = HeatmapAnnotation(`Cell type` = annotation_col$celltype,
+                       col = list(`Cell type` = c( 
+                              "B cells"="#66C2A5",
+                              "CD4+ T cells"="#FC8D62",
+                              "CD8+ T cells"="#8DA0CB",
+                              "Dendritic cells"="#E78AC3",
+                              "MDSC"="#A6D854",
+                              "TAM"="#FFD92F",
+                              "Treg"="#A6CEE3" ,  
+                              "Fibroblasts"="#ffb74d",
+                              "Endothelial cells"="#EF7906"
+                                               )),
+                       show_legend = T)
+
+ht = Heatmap(toplot_heatmap,
+             name = "Expression",
+             col = col_fun,
+             width = nrow(toplot_heatmap)*unit(12, "mm"), 
+             height = nrow(toplot_heatmap)*unit(7, "mm"),
+             column_split = annotation_col$celltype,
+             column_title = NULL,
+             cluster_rows = F,
+             cluster_columns = F,
+             show_column_names = F,
+             top_annotation = ha,
+             column_gap = unit(2,"mm"));ht
+
+pdf("../03.Output/FilterID/codex_F_com_FilterID_F_heatmap_7000.pdf", width = 10, height = 5)
+ht
+dev.off()
+
+# FeaturePlot to detect the expression of all features
+codex_F_com_F_subset_sample_prob_scale = ScaleData(codex_F_com_F_subset_sample_prob)
+p = FeaturePlot(codex_F_com_F_subset_sample_prob_scale,
+                slot = "scale.data",
+                features = rownames(codex_F_com),
+                ncol = 6,
+                min.cutoff = 0,
+                max.cutoff = 2,
+                cols = c("#AFDFD5", "#D96B0C"));p
+
+pdf("../03.Output/FilterID/codex_F_com_FilterID_F_Celltype_Umap_FeaturesExpres.pdf", width = 20, height = 17)
+p
+dev.off()
+
+```
+
+

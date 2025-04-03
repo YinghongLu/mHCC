@@ -1,0 +1,249 @@
+---
+title: "1.decontam"
+author: "yinghong"
+date: "2024-04-23"
+output: html_document
+---
+
+# load packages
+```{r}
+  library(dplyr);library("phyloseq");library("ggplot2");library(gridExtra);library(gplots) 
+  library("readxl");library("tibble");library(microbiomeutilities);library(decontam)
+  library(microbiome);library(tibble);library(stringi);library(DESeq2);library(ggsignif)
+  library(vegan);library(coin) ;library(ggpubr);library(reshape2);library(ggdendro)
+  library(ggalluvial);library(pheatmap);library(cvequality);library(ComplexHeatmap);library(ggsci)
+  library(psych);library(corrplot);library(RColorBrewer);require(circlize);library(tidyverse)
+  library('rlang');library(ape);library(ade4);library(export);library(FSA);library(ALDEx2)
+  library(magrittr);library(curatedMetagenomicData);library(edgeR);library(limma)
+  library(DEFormats);library(DESeq2);library(apeglm);library(corncob);library(scales);library("ggrepel");
+  library(ANCOMBC);library(Maaslin2);library(rstatix);library(ggVennDiagram) #library(MicrobiotaProcess)
+
+# dir.create("../01.Data")
+# dir.create("../02.Code")
+# dir.create("../03.Output")
+
+```
+
+
+# metadata
+```{r}
+dir.create("../03.Output/01.decontam")
+
+# metadata 
+design <- read.table("../01.Data/metadata_clininfo_v4.0.txt",header = T,row.names=1,sep = "\t")
+design$ID <- rownames(design)
+
+range(design_sample$fastq_counts) 
+mean(design_sample$fastq_counts)
+sd(design_sample$fastq_counts) 
+
+range(design_sample$feature_counts) 
+mean(design_sample$feature_counts) 
+sd(design_sample$feature_counts) 
+
+```
+
+# table-with-taxonomy
+```{r}
+
+table_with_taxonomy <- read.csv("../01.Data/merge-table-with-taxonomy-Control.txt", row.names = 1,
+                                 header = T,fileEncoding = "utf-8",sep="\t",stringsAsFactors = FALSE)
+
+table_with_taxonomy <- table_with_taxonomy[! grepl('Chloroplast', table_with_taxonomy$Taxon), ] 
+table_with_taxonomy <- table_with_taxonomy[! grepl('chloroplast', table_with_taxonomy$Taxon), ]  
+
+table_with_taxonomy <- table_with_taxonomy[! grepl('Mitochondria', table_with_taxonomy$Taxon), ]  
+table_with_taxonomy <- table_with_taxonomy[! grepl('mitochondria', table_with_taxonomy$Taxon), ]  
+
+colnames(table_with_taxonomy)
+
+```
+
+# 
+```{r}
+
+design <- design  
+table_with_taxonomy <- table_with_taxonomy 
+
+otumat <- table_with_taxonomy[,1:ncol(table_with_taxonomy)-1] 
+colnames(otumat)
+
+taxmat <- select(table_with_taxonomy,c(ncol(table_with_taxonomy))) 
+
+taxa <- taxmat
+
+blast_taxa<- do.call(rbind, lapply(taxa$Taxon, function(x) unlist(stri_split_fixed(x, "; ")))) %>% data.frame
+rownames(blast_taxa) <- rownames(taxa)
+colnames(blast_taxa) <- c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species")
+
+blast_taxa$Phylum <- ifelse(blast_taxa$Phylum=="","p__unassign",blast_taxa$Phylum)
+blast_taxa$Phylum <- ifelse(blast_taxa$Phylum=="p__","p__unassign",blast_taxa$Phylum)
+
+blast_taxa$Class <- ifelse(blast_taxa$Class=="","c__unassign",blast_taxa$Class)
+blast_taxa$Class <- ifelse(blast_taxa$Class=="c__","c__unassign",blast_taxa$Class)
+
+blast_taxa$Order <- ifelse(blast_taxa$Order=="","o__unassign",blast_taxa$Order)
+blast_taxa$Order <- ifelse(blast_taxa$Order=="o__","o__unassign",blast_taxa$Order)
+
+blast_taxa$Family <- ifelse(blast_taxa$Family=="","f__unassign",blast_taxa$Family)
+blast_taxa$Family <- ifelse(blast_taxa$Family=="f__","f__unassign",blast_taxa$Family)
+
+blast_taxa$Genus <- ifelse(blast_taxa$Genus=="","g__unassign",blast_taxa$Genus)
+blast_taxa$Genus <- ifelse(blast_taxa$Genus=="g__","g__unassign",blast_taxa$Genus)
+
+blast_taxa$Species <- ifelse(blast_taxa$Species=="","s__unassign",blast_taxa$Species)
+blast_taxa$Species <- ifelse(blast_taxa$Species=="s__","s__unassign",blast_taxa$Species)
+
+taxmat <- blast_taxa
+taxmat <- taxmat[rownames(otumat),]
+
+# phyloseq
+OTU = otu_table(as.matrix(otumat), taxa_are_rows = TRUE)
+TAX = tax_table(as.matrix(taxmat))
+samples = sample_data(design)
+
+physeq <- phyloseq(OTU, TAX, samples)
+physeq
+
+(physeq <- prune_taxa(taxa_sums(physeq) > 0, physeq)) 
+
+sort(colSums(otu_table(physeq)))
+
+save(physeq,file ="../03.Output/01.decontam/physeq.Rdata")
+
+```
+
+## decontam - Library Sizes
+```{r}
+# Inspect Library Sizes
+df <- as.data.frame(sample_data(physeq)) # Put sample_data into a ggplot-friendly data.frame
+df$LibrarySize <- sample_sums(physeq)
+df <- df[order(df$LibrarySize),]
+df$Index <- seq(nrow(df))
+
+(physeq.sample <- prune_samples(sample_data(physeq)$Group3=="TrueSample" ,physeq))
+(physeq.sample  <- prune_taxa(taxa_sums(physeq.sample ) > 0, physeq.sample ))
+
+(physeq.ctl <- prune_samples(sample_data(physeq)$Group3=="Control" ,physeq))
+(physeq.ctl <- prune_taxa(taxa_sums(physeq.ctl) > 0, physeq.ctl))
+
+otu_NC <- as.data.frame(otu_table(physeq.ctl))
+tax_NC <- as.data.frame(tax_table(physeq.ctl))
+
+df <- cbind(otu_NC,tax_NC)
+write.csv(df,"../03.Output/01.decontam/otu_5NC.csv")
+
+# 箱式图
+p_LibrarySize_B1 <- ggplot(data=df,aes(x=Group3, y=LibrarySize)) +
+  geom_jitter(size=0.5,width=0.3, alpha=1, show.legend = T,aes(color=Group3)) + # aes(color=Patient),
+  geom_boxplot (width=0.4,outlier.size = 0.5,alpha=0,linewidth=0.2) +
+  stat_compare_means(label.y =65000 ,size =4)+ #hide.ns = TRUE,ref.group = "BHI"
+   scale_y_continuous(labels = label_scientific()) + 
+  #stat_compare_means(comparisons = my_comparisons,label = "p.signif")+
+  # stat_compare_means(  #label.x = NULL,
+  #   label.y = 7000)+
+  #guides(fill= "Group") +
+  #guides(fill="none")+
+  #geom_signif(annotations="P=", y_position=, xmin=1, xmax=2, tip_length=0.045, textsize=5) +
+  theme(panel.background=element_rect(fill="white"),
+        panel.border = element_rect(fill=NA,size=0.1),
+        axis.title.x=element_blank(),
+        axis.title.y=element_text(size=14),
+        axis.line=element_line(size=0.1),
+        axis.text.x=element_text(color='black', size=12),
+        axis.text.y=element_text(color='black', size=12),
+        axis.ticks =element_line(color='black', size=0.2),
+        axis.ticks.length=unit(0.05, "cm"),
+        legend.position = "top",
+        legend.title=element_text(color='black', size=14),
+        legend.text=element_text(color='black', size=12),
+        legend.key = element_blank(),
+        title = element_text(color='black', size=14));p_LibrarySize_B1
+
+ggsave(path = "../03.Output/01.decontam","/LibrarySize_TrueSample_vs_cControl.pdf",width = 2.5, height = 2.5)
+
+# 
+p_LibrarySize_B2 <- ggplot(data=df, aes(x=Index, y=LibrarySize, color=Group3)) + 
+  # geom_point(size=0.1)+  
+  geom_jitter(width = 0.2, height = 0.2, size = 0.5) +
+  geom_point(data = subset(df, Group3 == "Control"), aes(x=Index, y=LibrarySize), color = "#bf5b17", size = 0.5) + # 突出A组
+  scale_color_manual(values=c("#d95f02","#1b9e77"))+
+  scale_y_continuous(labels = label_scientific()) + 
+  # geom_label_repel(aes(x=Index, y=LibrarySize, label=df$Group3))+
+  theme(panel.background=element_rect(fill="white"),
+        panel.border = element_rect(fill=NA,size=0.1),
+        axis.title.x=element_blank(),
+        axis.title.y=element_text(size=14),
+        axis.line=element_line(size=0.1),
+        axis.text.x=element_text(color='black', size=12),
+        axis.text.y=element_text(color='black', size=12),
+        axis.ticks =element_line(color='black', size=0.2),
+        axis.ticks.length=unit(0.05, "cm"),
+        legend.position = "top",
+        legend.title=element_text(color='black', size=14),
+        legend.text=element_text(color='black', size=12),
+        legend.key = element_blank(),
+        title = element_text(color='black', size=14));p_LibrarySize_B2
+ggsave(path = "../03.Output/01.decontam","LibrarySize_samples.pdf",width = 3, height = 3)
+
+```
+
+## decontam - Prevalence
+```{r}
+
+set.seed(1234)
+sample_data(physeq)$is.neg <- sample_data(physeq)$Group3 == "Control"
+
+contamdf.prev <- isContaminant(physeq, method="prevalence", neg="is.neg")
+table(contamdf.prev$contaminant) 
+head(which(contamdf.prev$contaminant))
+contamdf <- tax_table(physeq)[which(contamdf.prev$contaminant),] %>% data.frame
+write.csv(contamdf,"../03.Output/01.decontam/Env_5NC_contamdf.prev.csv" )
+contamdf.prev <- cbind(contamdf.prev,tax_table(physeq)[rownames(contamdf.prev),]) %>% data.frame
+write.csv(contamdf.prev ,"../03.Output/01.decontam/all_Env_5NC_contamdf.prev.csv" )
+
+contamdf.prev05 <- isContaminant(physeq, method="prevalence", neg="is.neg", threshold=0.5)
+table(contamdf.prev05$contaminant) #1744
+contamdf05 <- tax_table(physeq)[which(contamdf.prev05$contaminant),] %>% data.frame
+write.csv(contamdf05,"../03.Output/01.decontam/Env_5NC_contamdf.prev05.csv" )
+contamdf.prev05 <- cbind(contamdf.prev05,tax_table(physeq)[rownames(contamdf.prev05),]) %>% data.frame
+write.csv(contamdf.prev05 ,"../03.Output/01.decontam/all_Env_5NC_contamdf.prev05.csv" )
+
+# Make phyloseq object of presence-absence in negative controls and true samples
+physeq.pa <- transform_sample_counts(physeq, function(abund) 1*(abund>0))
+physeq.pa.neg <- prune_samples(sample_data(physeq.pa)$Group3 == "Control", physeq.pa)
+physeq.pa.pos <- prune_samples(sample_data(physeq.pa)$Group3 == "TrueSample", physeq.pa)
+# Make data.frame of prevalence in positive and negative samples
+df.pa <- data.frame(pa.pos=taxa_sums(physeq.pa.pos), pa.neg=taxa_sums(physeq.pa.neg),
+                    contaminant=contamdf.prev05$contaminant)
+
+p_prevalence_B2 <- ggplot(data=df.pa, aes(x=pa.neg, y=pa.pos, color=contaminant)) + 
+  geom_point(size=0.5) + #B1
+  xlab("Prevalence (Negative Controls)") + ylab("Prevalence (True Samples)")+
+  scale_color_manual(values=c("#d95f02","#1b9e77"))+
+    theme(panel.background=element_rect(fill="white"),
+        panel.border = element_rect(fill=NA,size=0.1),
+        axis.title.x=element_blank(),
+        axis.title.y=element_text(size=14),
+        axis.line=element_line(size=0.1),
+        axis.text.x=element_text(color='black', size=12),
+        axis.text.y=element_text(color='black', size=12),
+        axis.ticks =element_line(color='black', size=0.2),
+        axis.ticks.length=unit(0.05, "cm"),
+        legend.position = "top",
+        legend.title=element_text(color='black', size=14),
+        legend.text=element_text(color='black', size=12),
+        legend.key = element_blank(),
+        title = element_text(color='black', size=14));p_prevalence_B2
+
+ggsave(path = "../03.Output/01.decontam","prevalence.pdf",p_prevalence_B2,width = 3, height = 3)
+
+(physeq.decontam <- physeq) 
+(physeq.decontam <- prune_taxa(!contamdf.prev05$contaminant, physeq)) 
+
+(physeq.decontam <- prune_samples(sample_data(physeq.decontam)$Group3 == "TrueSample", physeq.decontam))
+(physeq.decontam <- prune_taxa(taxa_sums(physeq.decontam ) > 0, physeq.decontam ))
+
+save(physeq.decontam,file ="../03.Output/01.decontam/physeq.decontam.Rdata")
+
+```
