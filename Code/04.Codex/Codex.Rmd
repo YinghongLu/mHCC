@@ -69,7 +69,6 @@ inputdata_csd = lapply(inputdata, function(inputdata) {
     rename_with(~str_remove_all(.x, '\\(.*\\) ')) %>%
     rename_with(~str_remove_all(.x, ' Mean')) %>%
     na.omit()
-  
 })
 
 csd = bind_rows(inputdata_csd)
@@ -79,9 +78,6 @@ inputdata_raw = lapply(inputdata, function(inputdata) {
     select(-contains("Phenotype")) %>%
     select(-contains(Panel))
 })
-
-# inputdata_raw[[7]]$`Nucleus: Circularity` = as.double(inputdata_raw[[7]]$`Nucleus: Circularity`)
-# inputdata_raw[[7]]$`Cell: Circularity` = as.double(inputdata_raw[[7]]$`Cell: Circularity`)
 
 csd_raw = bind_rows(inputdata_raw)
 
@@ -94,7 +90,6 @@ rm(inputdata,inputdata_csd,inputdata_raw);gc()
 
 ## Filter
 ```{r}
-
 identical(rownames(csd),rownames(csd_raw))
 DataFilter2 = csd
 
@@ -108,7 +103,7 @@ DataFilter2<- DataFilter2[DataFilter2$rowsum  >= percentiles[1] & DataFilter2$ro
 marker_thresholds <- apply(DataFilter2[, 1:16], 2, function(x) quantile(x, probs = 0.99))
 
 DataFilter2 <- DataFilter2[apply(DataFilter2[, 1:16], 1, function(cell) {
-  all(cell <= marker_thresholds)  # 判断每个细胞是否都在阈值以下
+  all(cell <= marker_thresholds) 
 }), ]
 
 FilterID = DataFilter2$Cell.ID
@@ -117,7 +112,6 @@ save(FilterID, file = "../03.Output/FilterID/FilterID.RData")
 rm(list = ls());gc()
 
 ```
-
 
 # Create the filtered original Seurat object
 ```{r}
@@ -156,14 +150,14 @@ save(codex_F, file = "../03.Output/FilterID/codex_F_FilterID.RData")
 codex_F <- RunPCA(codex_F, features=CellMarkers_15)
 codex_F <- RunUMAP(codex_F, method = "umap-learn", metric = "correlation", dims = 1:length(codex_F@reductions$pca))
 
-p = DimPlot(codex_F, reduction = "umap", group.by = "sample_name", order = rev(unique(codex_F@meta.data$sample_name))) ;p #+ NoLegend()
+p = DimPlot(codex_F, reduction = "umap", group.by = "sample_name", order = rev(unique(codex_F@meta.data$sample_name)));p 
 pdf("../03.Output/FilterID/codex_F_FilterID_umap_merged.pdf", width = 6, height = 4)
 p
 dev.off()
 
 p = DimPlot(codex_F, reduction = "umap", group.by = "sample_name", split.by = "sample_name", ncol = 5,
             order = rev(unique(codex_F@meta.data$sample_name))) + NoLegend();p
-pdf("../03.Output/FilterID2/codex_F_FilterID_umap_split.pdf", width = 8, height = 4)
+pdf("../03.Output/FilterID/codex_F_FilterID_umap_split.pdf", width = 8, height = 4)
 p
 dev.off()
 
@@ -207,7 +201,7 @@ load(file = "../03.Output/FilterID/codex_F_com_FilterID.RData")
 codex_F_com <- RunPCA(codex_F_com, features=CellMarkers_15)
 codex_F_com <- RunUMAP(codex_F_com, method = "umap-learn", metric = "correlation", dims = 1:length(codex_F_com@reductions$pca))
 
-p = DimPlot(codex_F_com, reduction = "umap", group.by = "sample_name", order = rev(unique(codex_F_com@meta.data$sample_name))) ;p #+ NoLegend()
+p = DimPlot(codex_F_com, reduction = "umap", group.by = "sample_name", order = rev(unique(codex_F_com@meta.data$sample_name))) ;p 
 pdf("../03.Output/codex_F_com_FilterID_umap_merged.pdf", width = 6, height = 4)
 p
 dev.off()
@@ -230,7 +224,7 @@ load(file = "../03.Output/FilterID/codex_F_com_FilterID_umap_scale_result_k20.RD
 
 codex_F_com_phenograph.seurat = codex_F_com
 Idents(codex_F_com_phenograph.seurat) = PhenoGraph_codexFcom_scale_result_k20
-levels(codex_F_com_phenograph.seurat) = as.character(1:52) # to order the top annotation order of the following heatmap
+levels(codex_F_com_phenograph.seurat) = as.character(1:52) 
 
 p = DoHeatmap(subset(codex_F_com_phenograph.seurat, downsample=100), slot = "scale.data", assay = "CODEX",
               features = rownames(codex_F_com_phenograph.seurat), angle = 90, size = 4, disp.min = -2, disp.max = 2)+ NoLegend();p
@@ -261,8 +255,7 @@ codex_F_com_phenograph <- as.matrix(codex_F_com@assays$CODEX$scale.data)
 
 codex_F_com_phenograph.seurat = codex_F_com
 Idents(codex_F_com_phenograph.seurat) = PhenoGraph_codexFcom_scale_result_k20
-levels(codex_F_com_phenograph.seurat) = as.character(1:52) # to order the top annotation order of the following heatmap
-
+levels(codex_F_com_phenograph.seurat) = as.character(1:52) 
 new.cluster.ids <- c("MDSC",#1 
                      "TAM",#2 
                      "Unidentified",#3
@@ -418,23 +411,15 @@ sample_cell_immune$`Cell type` <- factor(sample_cell_immune$`Cell type`,levels =
                                                                        "CD4+ T cells",
                                                                        "CD8+ T cells",
                                                                        "Dendritic cells",
-                                                                       
                                                                        "TAM",
                                                                        "Treg",
                                                                        "Mix immune"))
-
 colors <- brewer.pal(7, "Set2")  
-# "#E41A1C" "#377EB8" "#4DAF4A" "#984EA3" "#FF7F00" "#FFFF33" "#A65628" "#F781BF" "#999999"
-#  "#66C2A5" "#FC8D62" "#8DA0CB" "#E78AC3" "#A6D854" "#FFD92F" "#E5C494" "#B3B3B3"
-#  "#A6CEE3" "#1F78B4" "#B2DF8A" "#33A02C" "#FB9A99" "#E31A1C" "#FDBF6F" "#FF7F00" "#CAB2D6"
-
 colors <- c(colors, "lightgray")
 
 p <- ggplot(sample_cell_immune, aes(x = `Sample_name`, y = Value, fill = `Cell type`)) +
   geom_bar(stat = "identity", position = "stack", width = 0.6) +
-
   labs(x = NULL, y = "Immune", title = "Cellular compositions in each specimens") +
-  
   scale_fill_manual(values =c("Mix immune"="lightgray",
                               "B cells"="#66C2A5",
                               "CD4+ T cells"="#FC8D62",
@@ -444,7 +429,6 @@ p <- ggplot(sample_cell_immune, aes(x = `Sample_name`, y = Value, fill = `Cell t
                               "TAM"="#FFD92F",
                               "Treg"="#A6CEE3" 
   ))+
-
   theme_minimal(base_size = 14) +
   theme( 
     panel.border = element_rect(fill=NA,color="black", size=1, linetype="solid"),
@@ -467,12 +451,9 @@ sample_cell_immune$Group <- sapply(sample_cell_immune$Sample_name, function(x) s
 p <- ggplot(sample_cell_immune[!sample_cell_immune$`Cell type`=="Mix immune",], aes(x = `Cell type`, y = Value, color = Group)) +
   geom_boxplot(outlier.shape = NA, position = position_dodge(0.8), width = 0.6) +
   geom_jitter(position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.8), size = 1.5, alpha = 0.7) +
-  
   stat_compare_means(aes(group = Group), method = "wilcox.test", label = "p.format", size = 3,
                      position = position_nudge(y = 2)) +
-
   labs(x = "Cell Type", y = "% of CD45+", title = "Proportions of immune cells in each group") +
-  
   theme_minimal(base_size = 14) +
   theme( 
     panel.border = element_rect(fill=NA,color="black", size=1, linetype="solid"),
@@ -485,7 +466,6 @@ p <- ggplot(sample_cell_immune[!sample_cell_immune$`Cell type`=="Mix immune",], 
     legend.text=element_text(color='black', size=12),
     panel.grid.major.x = element_blank()
   ) +
-
   scale_color_manual(values = c("IM" = "#D55E00", "MO" = "#0072B2"));p
 
 pdf("../03.Output/FilterID/codex_F_com_FilterID_F_Proportions_boxplot_with_p.pdf", width = 6, height = 4)
@@ -495,12 +475,9 @@ dev.off()
 p <- ggplot(sample_cell_immune[!sample_cell_immune$`Cell type`=="Mix immune",], aes(x = `Cell type`, y = Value, color = Group)) +
   geom_boxplot(outlier.shape = NA, position = position_dodge(0.8), width = 0.6) +
   geom_jitter(position = position_jitterdodge(jitter.width = 0.2, dodge.width = 0.8), size = 1.5, alpha = 0.7) +
-  
   # stat_compare_means(aes(group = Group), method = "wilcox.test", label = "p.format", size = 3,
   #                    position = position_nudge(y = 2)) +
-  
   labs(x = "Cell Type", y = "% of CD45+", title = "Proportions of immune cells in each group") +
-  
   theme_minimal(base_size = 14) +
   theme( 
     panel.border = element_rect(fill=NA,color="black", size=1, linetype="solid"),
@@ -513,21 +490,17 @@ p <- ggplot(sample_cell_immune[!sample_cell_immune$`Cell type`=="Mix immune",], 
     legend.text=element_text(color='black', size=12),
     panel.grid.major.x = element_blank()
   ) +
-  
   scale_color_manual(values = c("IM" = "#D55E00", "MO" = "#0072B2"));p
 
 pdf("../03.Output/FilterID/codex_F_com_FilterID_F_Proportions_boxplot_without_p.pdf", width = 6, height = 3)
 p
 dev.off()
 
-
 ```
-
 
 ## Cell type filter
 ```{r}
 #### Delete Unidentified cells and cells in  regions with poor quality ####
-# Second round QC, pick passed cells to proceed following analysis
 UnidentifiedCellID = WhichCells(codex_F_com,
                                 idents = c("Unidentified","Mix immune"))
 
@@ -536,7 +509,6 @@ DeletedCellID = unique(c(UnidentifiedCellID))
 codex_F_com_F = subset(codex_F_com,
                        cells = DeletedCellID,
                        invert = TRUE)
-
 codex_F_com_F = ScaleData(codex_F_com_F)
 
 codex_F_com_F <- RunPCA(codex_F_com_F, features=CellMarkers_15)
@@ -565,7 +537,6 @@ unique(codex_F_com_F$celltype)
 cols=c("#66C2A5","#FC8D62","#8DA0CB","#E78AC3","#A6D854","#FFD92F","#A6CEE3","#ffb74d","#e6755b")
 orders = c("B cells","CD4+ T cells","CD8+ T cells","Dendritic cells","MDSC","TAM","Treg","Fibroblasts","Endothelial cells")
 
-
 pal<-colorRampPalette(cols)
 image(x=1:9,y=1,z=as.matrix(1:9),col=pal(9))
 
@@ -577,7 +548,7 @@ for (i in 1:9) {
   subset_list[[i]] = subset(temp, downsample = downsample_cycle[i])
 }
 
-codex_F_com_F_subset_sample_prob = merge(x = subset_list[[1]], y = unlist(subset_list)[2:9], merge.data = T) # no scale data
+codex_F_com_F_subset_sample_prob = merge(x = subset_list[[1]], y = unlist(subset_list)[2:9], merge.data = T) 
 codex_F_com_F_subset_sample_prob = subset(codex_F_com_F, cells = colnames(codex_F_com_F_subset_sample_prob))
 
 p = DimPlot(codex_F_com_F_subset_sample_prob, 
@@ -610,7 +581,7 @@ p = DimPlot(codex_F_com_F_subset_sample_prob,
             ncol = 4,
             pt.size = 0.4) + NoLegend();p
 
-pdf("../03.Output/FilterID_/codex_F_com_FilterID_F_Celltype_Umap_Split.pdf", width = 13, height = 8)
+pdf("../03.Output/FilterID/codex_F_com_FilterID_F_Celltype_Umap_Split.pdf", width = 13, height = 8)
 p
 dev.off()
 
@@ -623,7 +594,6 @@ DotPlot(codex_F_com_F,
   theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
   labs(title = "Bubble Plot of Gene Expression")
 
-
 ```
 
 ### dotplot
@@ -632,7 +602,7 @@ DotPlot(codex_F_com_F,
 temp_subset = subset(codex_F_com_F, features = CellMarkers_15)
 temp_subset = subset(temp_subset, downsample=7000)
 
-dt <- codex_F_com@assays$CODEX$scale.data #这里以Top5上调为例
+dt <- codex_F_com@assays$CODEX$scale.data 
 dtt <- expm1(dt)
 
 dt_list <- lapply(unique(codex_F_com_F$celltype), FUN = function(x){
@@ -667,23 +637,16 @@ dot_scale <- lapply(CellMarkers_15, FUN = function(x){
 dot_dt <- do.call("rbind", dot_scale)
 head(dot_dt) 
 
-dot_dt$celltype <- factor(dot_dt$celltype,
-                          # levels = c('Naive CD4 T','Memory CD4 T',
-                          #            'CD14+ Mono','B','CD8 T','FCGR3A+ Mono',
-                          #            'NK','DC','Platelet')
-                          )
+dot_dt$celltype <- factor(dot_dt$celltype)
 
-#ggplot2绘图：
 p1 <- ggplot(dot_dt, aes(x = celltype, y = gene)) + 
   geom_point(aes(size = pro, color = scale)) 
 p1
 
-col_fun = circlize::colorRamp2(c(-0.8, 0, 2), c('#5E3C99', "white", '#E66101')) 
+col_fun = circlize::colorRamp2(c(-1, 0, 2), c('#5E3C99', "white", '#E66101')) 
 
-#图表个性化调整:
 p2 <- p1 +
-  scale_size_continuous(range = c(2,6)) + #气泡大小范围调整
-  # scale_color_gradient2(low='#5E3C99', high='#E66101', mid = 'white') + 
+  scale_size_continuous(range = c(2,6)) + 
   scale_color_gradientn(colors = col_fun(seq(-1, 2, length.out = 100))) +  
   theme_classic() +
   theme(legend.text = element_text(size = 12,color = "black"), 
@@ -691,18 +654,16 @@ p2 <- p1 +
         axis.text = element_text(size = 12,color = "black"), 
         axis.title = element_text(size = 14,color = "black"), 
         axis.text.x = element_text(angle = 90, vjust = 0.5,hjust = 1)) +
-  labs(x = 'Identity',y = 'Features', #xy轴标题修改
+  labs(x = 'Identity',y = 'Features', 
        color = 'Average Expression', size = 'Percent Expressed') + 
-  coord_flip() #坐标轴翻转
+  coord_flip() 
 p2
 
 pdf("../03.Output/FilterID/codex_F_com_FilterID_F_dotplot.pdf", width =7, height = 4)
 p2
 dev.off()
 
-
 ```
-
 
 
 ### heatmap
@@ -720,7 +681,6 @@ annotation_col = subset(annotation_col, select = "celltype")
 annotation_col = data.frame(cellid = rownames(annotation_col),
                             celltype = annotation_col$celltype)
 
-
 annotation_col$celltype <- factor(annotation_col$celltype,levels = c(  "B cells",
                                                                        "Endothelial cells",
                                                                        "MDSC",
@@ -730,7 +690,6 @@ annotation_col$celltype <- factor(annotation_col$celltype,levels = c(  "B cells"
                                                                        "Dendritic cells",
                                                                        "Treg",
                                                                        "TAM"
-                                                                       
                                                                        ))
 
 col_fun = circlize::colorRamp2(c(-2, 0, 2), c("#6EC388", "white", "#C82033")) 

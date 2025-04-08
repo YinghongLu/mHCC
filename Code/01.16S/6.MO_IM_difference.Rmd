@@ -1,0 +1,197 @@
+---
+title: "6.MO_IM_difference"
+author: "yinghong"
+date: "2024-04-23"
+output: html_document
+---
+
+# 1.
+```{r}
+
+dir.create("../03.Output/06.MO_IM_difference")
+
+rm(list=ls())
+
+load(file = "../03.Output/02.tax/species/ps.species.nodule.rna.Rdata")
+
+# nodule
+ps.HVM.filt <-ps.asv.nodule.rna 
+ps.HVM.filt <- ps.species.nodule.rna 
+ps.HVM.filt <- ps.genus.nodule.rna 
+
+# 
+otu_filt_HVM_diff <- otu_table(ps.HVM.filt) %>% data.frame()    
+design_filt_HVM_diff <- sample_data(ps.HVM.filt)  %>% data.frame() 
+table(design_filt_HVM_diff$nodule)
+
+```
+
+
+# 2.nodule
+```{r}
+dat <- otu_filt_HVM_diff %>%
+  tibble::rownames_to_column(var="asv")%>%
+  transform(asv = factor(asv))
+## foldchange
+dat1 <- otu_filt_HVM_diff %>%
+  tibble::rownames_to_column(var="asv") %>% 
+  pivot_longer(-asv, names_to = 'ID', values_to = 'value') %>% 
+  left_join(design_filt_HVM_diff[,c("ID","nodule")], by = 'ID')  
+head(dat1)
+dat2 <- dat1 %>%
+  mutate(value1=(value>0)*1) %>%
+  group_by(asv,nodule)%>%
+  summarise(prev=count(value1)/length(value1) ,.groups = "keep") %>% 
+  pivot_wider(names_from = nodule, values_from = prev) #%>%  
+  # rename( "MO.prev" = MO, "IM.prev" = IM)
+#计算FC
+dat_FC1 <- dat1 %>% group_by(asv,nodule) %>%  
+  summarise(median=median(value,na.rm=T),.groups = "keep") %>% 
+  pivot_wider(names_from = nodule, values_from = median) 
+  #mutate("median_Foldchange_IM_MO"=IM/MO)
+dat_FC2 <- dat1 %>% group_by(asv,nodule) %>% 
+  summarise(mean=mean(value,na.rm=T),.groups = "keep") %>% 
+  pivot_wider(names_from = nodule, values_from = mean) %>% 
+  mutate("Foldchange_IM_MO"=IM/MO) 
+  #mutate("Foldchange_T_A"=Tumor/Adjacent) %>%
+  #dat_FC[dat_FC==0] <- 0.00001 %>% 
+  # summarise("Foldchange_IM_MO"=IM/MO)
+row_fc <- dat_FC2
+row_fc$Foldchange_MO_IM <- row_fc$MO/row_fc$IM
+head(dat_FC2)
+dat3 <- otu_filt_HVM_diff %>%
+  t() %>%
+  as.data.frame()
+asv <- colnames(dat3)
+dat_normal_condition <- dat3 %>% 
+  shapiro_test(asv) %>%
+  mutate(Normal_Distribution = case_when(p > 0.05 ~ 'YES', TRUE ~ 'NO')) %>% 
+  select(asv=variable,Normal_Distribution) %>% 
+  merge(dat,by="asv")
+head(dat_normal_condition)
+
+# dat_ttest <- dat_normal_condition %>% 
+#   filter(Normal_Distribution=="YES") %>% #normal distribution
+#   select(-Normal_Distribution) %>% 
+#   pivot_longer(-met, names_to = 'sample.name', values_to = 'value') %>% 
+#   left_join(meta, by = 'sample.name') %>% 
+#   group_by(met) %>%
+#   t_test(value ~ group) %>% #t_test
+#   adjust_pvalue(method = 'fdr') %>% 
+#   filter(group1=="IN",group2=="QH") %>%# A vs B
+# select(-(group1:group2)) %>% 
+#   select(c('met','p','p.adj')) %>%  #,'p.adj.signif'
+#   rename(`P_value` = p, FDR = p.adj)  #,signif=p.adj.signif
+# head(dat_ttest)
+
+dat_wttest <- dat_normal_condition %>% 
+  filter(Normal_Distribution=="NO") %>% #non-normal distribution
+  select(-Normal_Distribution) %>% 
+  pivot_longer(-asv, names_to = 'ID', values_to = 'value') %>% 
+  left_join(design_filt_HVM_diff[,c("ID","nodule")], by = 'ID') %>%  
+  transform(asv = factor(asv))%>%
+  group_by(asv) %>%
+  rstatix::wilcox_test(value ~ nodule) %>% 
+  adjust_pvalue(method = 'fdr') %>% 
+  filter(group1=="MO",group2=="IM") %>%# A vs B-- Adjacent Tumor
+  select(-(group1:group2)) %>% 
+  select(c('asv','p','p.adj')) %>% #,'p.adj.signif'
+  dplyr::rename("wt.p" = "p", "wt.FDR" = "p.adj")   #,signif=p.adj.signif
+head(dat_wttest)
+### ks.test
+OTU1 <- otu_filt_HVM_diff %>% data.frame() %>%t() 
+OTU <- OTU1 %>% data.frame()
+colnames(OTU) <- colnames(OTU1)
+OTU$group <- design_filt_HVM_diff$nodule
+result.ks <- list()
+for (i in 1:122){ 
+  #print(i)
+  print(colnames(OTU)[i])
+  result.ks[[i]] <- ks.test(OTU[,i]~OTU$group,OTU)
+  names(result.ks)[[i]] <- colnames(OTU)[i]
+}
+result.ks_1 <-do.call(rbind,result.ks) %>% data.frame
+result.ks_2 <- result.ks_1 %>%
+  tibble::rownames_to_column(var="asv") %>%
+  adjust_pvalue(method = 'fdr') %>%
+  select(c('asv','p.value','p.value.adj')) %>% #,'p.adj.signif'
+  rename("p.value" = "ks.p", "p.value.adj" = "ks.FDR") %>%
+  unnest(c(asv, ks.p, ks.FDR))
+#合并
+dat_result <- dat2 %>%
+  merge(dat_FC1,by="asv") %>% #full_join(dat_wttest) %>% 
+  merge(dat_FC2,by="asv") %>%
+  merge(dat_wttest,by="asv") %>%
+  merge(result.ks_2,by="asv") %>%
+  write_excel_csv(file = "../03.Output/06.MO_IM_difference/unrarefied.ps.species.nodule.rna_dat_result.csv")
+
+# dat_result <- merge(dat_result,as.data.frame(tax_table(ps.HVM.filt)),by.x="asv",by.y="row.names") %>%
+#   write_excel_csv(file = "./08.MO_IM_difference/unrarefied.ps.asv.nodule.rna_dat_result.csv")
+
+a <- dat_result[dat_result$Foldchange_IM_MO>1 & dat_result$wt.p<0.05,] %>% view() %>%
+   write_excel_csv(file = "../03.Output/06.MO_IM_difference/unrarefied.ps.species.nodule.rna_dat_result_P.csv")
+
+```
+
+# 3.lefse
+```{r}
+###### 非HVM ###
+
+# nodule
+ps.HVM.filt <- ps.asv.nodule.rna
+
+# 赋值 二选一
+otu_filt_HVM_diff <- otu_table(ps.HVM.filt) %>% data.frame()     
+design_filt_HVM_diff <- sample_data(ps.HVM.filt)  %>% data.frame() 
+
+```
+
+## lefse nodule
+```{r}
+library(microbiomeMarker)
+set.seed(12)
+mm <- microbiomeMarker:: run_lefse(
+  ps.HVM.filt,
+  group='nodule1', 
+  taxa_rank = "all", 
+  subgroup = NULL,
+  norm = "CPM", 
+  wilcoxon_cutoff = 0.05, 
+  bootstrap_n = 50, 
+  lda_cutoff =3 
+)
+
+mm@marker_table[mm@marker_table$enrich_group=="MO",]$ef_lda <- 0-mm@marker_table[mm@marker_table$enrich_group=="MO",]$ef_lda
+
+cols <- RColorBrewer::brewer.pal(8, "Dark2")
+plot_ef_bar(mm, label_level = 1 ) +
+  scale_fill_manual(values = cols[1:2])
+
+mm %>% marker_table() %>% data.frame() -> res.diff.species.unfilt 
+res.diff.df <- res.diff.species.unfilt  
+
+pdf("../03.Output/06.MO_IM_difference/ps.species.nodule_lefse_unfilt.pdf",width = 9.5/2.54,height =8.5/2.54)
+plot_ef_bar(mm, label_level = 2 ) +
+  scale_fill_manual(values = c("MO" = "#5B9BD5", "IM" ="#DE6757"))+
+  # coord_cartesian(xlim = c(-4.5, 4.5))+
+  scale_x_continuous(breaks=c(-4, -2, 0,2 ,4))+
+  theme(panel.background=element_rect(fill="white"),
+      panel.border = element_rect(fill=NA,size=0.2),
+      axis.title.x=element_text(size=6), 
+      axis.title.y=element_blank(), 
+      axis.text.x=element_text(color='black', size=6), 
+      axis.text.y =element_text(color="black", size=9,face="italic"),
+      axis.ticks.length =unit(0.05, "cm"),
+      axis.ticks = element_line(color='black', size=0.2),
+      legend.position = "top",
+      legend.key=element_blank(),
+      legend.key.height = unit(7, "pt"),
+      legend.key.width  = unit(7, "pt"),
+      legend.title=element_text(color='black', size=7),
+      legend.text=element_text(color='black', size=6),
+      title = element_text(color='black', size=9))
+# ggsave(path="./08.MO_IM_difference/ps.species.nodule_lefse_unfilt.pdf",p_diff,width = 8, height = 6,units = "cm")
+dev.off()
+
+```
+

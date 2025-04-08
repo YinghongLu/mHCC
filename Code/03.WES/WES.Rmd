@@ -43,22 +43,16 @@ file_pattern <- "../01.Data/maf/*.maf"
 files <- list.files(path = "../01.Data/maf", pattern = "\\.maf$", full.names = TRUE)
 
 sample_depths <- lapply(files, function(file) {
-
   maf <- read_tsv(file, col_types = cols(.default = "c"))
-
   maf <- maf %>%
     mutate(
       Ref_allele_depth = as.numeric(Ref_allele_depth),
       Alt_allele_depth = as.numeric(Alt_allele_depth)
     )
-  
   maf <- maf %>%
     mutate(total_depth = Ref_allele_depth + Alt_allele_depth)
-
   avg_depth <- mean(maf$total_depth, na.rm = TRUE)
-  
   sample_name <- strsplit(basename(file), "\\.")[[1]][1]
-  
   return(data.frame(Sample = sample_name, Avg_Depth = avg_depth))
 }) %>% bind_rows()
 
@@ -70,9 +64,7 @@ overall_avg_depth <- mean(sample_depths$Avg_Depth, na.rm = TRUE)
 ```{r}
 
 all_samples_maf <- lapply(files, function(file) {
-
   maf <- read_tsv(file, col_types = cols(.default = "c"))
-
   sample_name <- strsplit(basename(file), "\\.")[[1]][1]
   maf <- maf %>% mutate(Tumor_Sample_Barcode = sample_name)
   return(maf)
@@ -82,7 +74,6 @@ output_file <- "../03.Output/merged_samples_maf.maf"
 write_tsv(all_samples_maf, output_file)
 
 maf <- read_tsv(output_file)
-
 maf <- maf %>%
   mutate(total_depth = Ref_allele_depth + Alt_allele_depth)
 
@@ -267,7 +258,7 @@ col_vector = unlist(mapply(brewer.pal, qual_col_pals$maxcolors, rownames(qual_co
 
 oncoplot(maf = maf_data, top = 10,writeMatrix=T)
 
-oncoplot(maf = maf_data,genes = drivergene1$Gene, fontSize = 1 ,showTumorSampleBarcodes = F,  #genes=top_genes, 
+oncoplot(maf = maf_data,genes = drivergene1$Gene, fontSize = 1 ,showTumorSampleBarcodes = F,
          draw_titv = TRUE,writeMatrix = TRUE)
 
 mat <- read.table('../02.Code/onco_matrix.txt',sep = '\t') %>% as.data.frame()
@@ -331,7 +322,7 @@ oncoPrint(mat,
           alter_fun_is_vectorized = FALSE,
           row_order = 1:nrow(mat),
           column_order = 1:ncol(mat),
-          pct_gp = gpar(fontsize = 12), # 百分比的字体大小
+          pct_gp = gpar(fontsize = 12), 
           col = col,
           pct_side = "right",
           row_names_side = "left",
@@ -392,7 +383,6 @@ a <- sort(table(mut1$Hugo_Symbol)) %>% as.data.frame()
 ```{r}
 
 metadata <- read.table("../01.Data/metadata_WES.tsv",header = T,row.names=1,sep = "\t")
-
 metadata$patient1 <- metadata$patient
 metadata$patient1 <- gsub("HCC","S",metadata$patient1)
 
@@ -423,18 +413,15 @@ for (i in 1:length(unique(mut$patient))){
     print(j)
     mat0 <- unique(mut[mut$patient==j,c("tumorsite","mutation_id","Hugo_Symbol","ExonicFunc.refGene")]) # 
     mat0$ExonicFunc.refGene <- ifelse(mat0$ExonicFunc.refGene=="-","splicing",mat0$ExonicFunc.refGene)
-
     mat=mat0 %>% data.frame
     mat <- mat[,-which(colnames(mat) %in% c("Hugo_Symbol"))] #,"ExonicFunc.refGene"
     mat=spread(mat,tumorsite,ExonicFunc.refGene,fill=0) %>% tibble::column_to_rownames(var="mutation_id")
     mat[,1:ncol(mat)] <- lapply(mat[,1:ncol(mat)],as.factor)
     mutation_id[[i]] <- mat
     names(mutation_id)[[i]] <-j
-    
     mat_SNV <- apply(mat,2,function(x){
       sum(!x=="0")
     }) %>% as.matrix()
-    
     mat_spread=mat %>% as.data.frame
     mat_spread$count <- apply(mat_spread,1,function(x){
       sum(!x=="0")
@@ -474,10 +461,8 @@ for (i in 1:length(unique(mut$patient))){
     dat1 <- dat1[,-1]
     dat1$drivergene <- ifelse(dat1$Hugo_Symbol %in% drivergene1$Gene,"YES","NO")
     write.csv(dat1,file=paste0("../03.Output/patient1/",j,"_dat.csv"))
-    
     drivermark <- which( dat1$Hugo_Symbol %in% drivergene1$Gene)
     labs <- dat1$Hugo_Symbol[drivermark] 
-
     ha <-  rowAnnotation(type=dat1$label, simple_anno_size = unit(2, "mm"), #width = unit(2, "mm"),
                          col=list(type=c("trunk"="#a64942","brunch"="#f29c2b","private"="#8bc24c")), 
                          show_legend = F,show_annotation_name = FALSE, #"#7B3B8C"
@@ -489,7 +474,6 @@ for (i in 1:length(unique(mut$patient))){
                         names = c("0", "nonsynonymous SNV","frameshift insertion","frameshift deletion","nonframeshift insertion","nonframeshift deletion","stopgain","stoploss","splicing")
                         #c("#145593","firebrick3","#4f0804","#9c331e","#bb6b4e","#b38766","#ddbb93","#e4ccb3")) 
     ) #"#fffff5"
-
     p <- ComplexHeatmap::Heatmap(as.matrix(dat1[,1:ncol(mat)]),col = colors, #border = T,
                                  #name = paste0(j," (",percentage,"%)"),
                                  #rect_gp = gpar(col = "#F5F7FA", lwd = 0.001),
@@ -514,7 +498,6 @@ for (i in 1:length(unique(mut$patient))){
     size = calc_ht_size(p)
     width = size[1]+0.1
     height = size[2]
-    
     pdf(paste0("../03.Output/patient/",j,"_",paste0(cust_label[cust_label$name==j,]$name_change),"_withlabel.pdf"), height = height , width =width)
     print(p)
     dev.off()
@@ -543,18 +526,15 @@ for (i in 1:length(unique(mut$patient))){
     print(j)
     mat0 <- unique(mut[mut$patient==j,c("tumorsite","mutation_id","Hugo_Symbol","ExonicFunc.refGene")]) 
     mat0$ExonicFunc.refGene <- ifelse(mat0$ExonicFunc.refGene=="-","splicing",mat0$ExonicFunc.refGene)
-
     mat=mat0 %>% data.frame
     mat <- mat[,-which(colnames(mat) %in% c("Hugo_Symbol"))] #,"ExonicFunc.refGene"
     mat=spread(mat,tumorsite,ExonicFunc.refGene,fill=0) %>% tibble::column_to_rownames(var="mutation_id")
     mat[,1:ncol(mat)] <- lapply(mat[,1:ncol(mat)],as.factor)
     mutation_id[[i]] <- mat
     names(mutation_id)[[i]] <-j
-    
     mat_SNV <- apply(mat,2,function(x){
       sum(!x=="0")
     }) %>% as.matrix()
-    
     mat_spread=mat %>% as.data.frame
     mat_spread$count <- apply(mat_spread,1,function(x){
       sum(!x=="0")
@@ -595,7 +575,6 @@ for (i in 1:length(unique(mut$patient))){
     
     drivermark <- which( dat1$Hugo_Symbol %in% drivergene1$Gene)
     labs <- dat1$Hugo_Symbol[drivermark] 
-    
     ha <-  rowAnnotation(type=dat1$label, simple_anno_size = unit(2, "mm"), #width = unit(2, "mm"),
                          col=list(type=c("trunk"="#a64942","brunch"="#f29c2b","private"="#8bc24c")), 
                          show_legend = F,show_annotation_name = FALSE #"#7B3B8C"
@@ -607,7 +586,6 @@ for (i in 1:length(unique(mut$patient))){
                         names = c("0", "nonsynonymous SNV","frameshift insertion","frameshift deletion","nonframeshift insertion","nonframeshift deletion","stopgain","stoploss","splicing")
                         #c("#145593","firebrick3","#4f0804","#9c331e","#bb6b4e","#b38766","#ddbb93","#e4ccb3")) 
                         ) #"#fffff5"
-
     p <- ComplexHeatmap::Heatmap(as.matrix(dat1[,1:ncol(mat)]),col = colors, #border = T,
                                   #name = paste0(j," (",percentage,"%)"),
                                   #rect_gp = gpar(col = "#F5F7FA", lwd = 0.001),
@@ -631,7 +609,6 @@ for (i in 1:length(unique(mut$patient))){
     size = calc_ht_size(p)
     width = size[1]+0.1
     height = size[2]
-    
     pdf(paste0("../03.Output/patient/",j,"_",paste0(cust_label[cust_label$name==j,]$name_change),"_1.pdf"), height = height , width =width)
     print(p)
     dev.off()
@@ -693,7 +670,6 @@ p_percentage <-   ggplot(data=percentage_mutationid_1_long, mapping=aes(x=name_c
 ggsave("../03.Output/percentage_mutationid.pdf",p_percentage,width=6,height=4)
 
 ```
-
 
 ## ITH - by jaccard distance
 ```{r}
@@ -840,7 +816,6 @@ ggsave("../03.Output/distance2.pdf",p_distance,width=3.5,height=2.8)
 ```{r}
 
 total_bases <- 60 * 10^6 
-
 tmb_data <- tmb(maf = maf_data, captureSize = total_bases)
 
 tmb_df <- data.frame(
@@ -915,16 +890,14 @@ library(pheatmap)
 maf <- maf_data@data
 
 colnames(maf)
-
 sample.mut.ref<-data.frame(Sample=maf[,6],
                            chr =maf[,1], 
                            pos = maf[,2], 
                            ref = maf[,4],
-                           alt = maf[,5]) #57037 43134
+                           alt = maf[,5]) 
 colnames(sample.mut.ref) <- c("Sample","chr","pos","ref","alt")
 
 data(signatures.cosmic)
-
 sigs.input<-mut.to.sigs.input(mut.ref = sample.mut.ref,
                                 sample.id = "Sample",
                                 chr = "chr",
@@ -964,10 +937,9 @@ df2 <- df2[,rownames(metadata)]
 
 
 RowV <- as.matrix(df1) %>%
-  factoextra::get_dist(method = 'euclidean') %>% # "euclidean", "maximum", "manhattan", "canberra", "binary", "minkowski", "pearson", "spearman" or "kendall"
-  hclust(method = 'ward.D2') %>% rev %>% # "ward.D", "ward.D2", "single", "complete", "average" (= UPGMA), "mcquitty" (= WPGMA), "median" (= WPGMC) or "centroid" (= UPGMC).
+  factoextra::get_dist(method = 'euclidean') %>% 
+  hclust(method = 'ward.D2') %>% rev %>% #
   as.dendrogram
-# save(RowV, file = 'Result/2.scMethod-allOTU-GI-heatmap.RowV.Rds')
 
 ordering_row <- seq(dim(df1)[1]); names(ordering_row) <- rownames(df1)
 ordering_row <- ordering_row[order.dendrogram(RowV)]
@@ -981,8 +953,6 @@ p <-ComplexHeatmap::Heatmap(mat=df2,col = colorRampPalette(c("white","red"))(2),
                         cluster_columns = F,
                         show_column_dend = F,
                         show_heatmap_legend = FALSE,
-                        # right_annotation = rowAnnotation(patient=metadata$patient,
-                        #                                  col=list(Patient=structure(names=c(levels(unique(metadata$patient))),c(col_vector[1:58])))),
                         top_annotation = HeatmapAnnotation(Age=metadata$age,Gender=metadata$sex,Smoking=metadata$Smoking,Alcohol=metadata$Alcohol,
                                                            # TBIL=metadata$TBil,DBIL=metadata$DBil,ALT=metadata$ALT,AST=metadata$AST,
                                                            # HBsAg=metadata$HBsAg,HCV=metadata$HepC,
@@ -1064,19 +1034,6 @@ p_diff <-   ggplot(data=df3, mapping=aes(x=nodule,y=propotion,fill=nodule))+ #re
         legend.key.width  = unit(8, "pt"),
         strip.text = element_text(size=12), #hcc
         strip.background = element_blank()) 
-
-  # theme(panel.grid.major = element_blank(),
-  #       panel.grid.minor = element_blank(),
-  #       panel.background=element_blank(),
-  #       panel.border = element_rect(color = "black", linewidth = 1, fill = NA),
-  #       #axis.title.x=element_text(size=12,face = "bold"),
-  #       axis.title.y=element_text(size=12,face = "bold"),
-  #       axis.text = element_text(size = 10,face = "bold"),
-  #       axis.text.x = element_text(angle = 90, hjust = 1,vjust = 0.5),
-  #       axis.ticks.x = element_blank(),
-  #       strip.text = element_text(face = "bold",size=12),
-  #       legend.text = element_text(size = 11),
-  #       legend.key.size = unit(12, "pt"))
 p_diff
 
 ggsave("../03.Output/signature_nodule_difference.pdf",width = 10,height = 5)

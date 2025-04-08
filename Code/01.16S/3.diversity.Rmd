@@ -1,0 +1,570 @@
+---
+title: "3.diversity"
+author: "yinghong"
+date: "2024-04-23"
+output: html_document
+---
+
+# 1.otu_Flattening
+```{r}
+dir.create("../03.Output/03.diversity")
+
+rm(list=ls())
+
+load(file ="../03.Output/02.tax/ps.rarefied.asv.Rdata")
+
+otu_Flattening <- otu_table(ps.rarefied.asv)%>% data.frame 
+otu_Flattening_t <- t(otu_Flattening) %>% data.frame
+
+design_filt_rarefy <- sample_data(ps.rarefied.asv) %>% data.frame
+
+```
+
+# 2.alpha diversity
+```{r}
+#alpha——diversity
+alpha_diversity=function(x){
+  observed_species=estimateR(x)[1,]
+  chao1=estimateR(x)[2,]
+  ACE=estimateR(x)[4,]
+  shannon=diversity(x,index="shannon",base=2)
+  simpson=diversity(x,index="simpson")
+  goods_coverage=1-rowSums(x==1)/rowSums(x)
+  shannon=sprintf("%0.4f", shannon)
+  simpson=sprintf("%0.4f", simpson)
+  goods_coverage=sprintf("%0.10f", goods_coverage)
+  result=data.frame(observed_species,chao1,ACE,shannon,simpson,goods_coverage)
+  result
+}
+
+alpha=alpha_diversity(otu_Flattening_t)
+alpha[,c("shannon","simpson")] <- lapply(alpha[,c("shannon","simpson")],as.numeric)
+alpha$ID <- rownames(alpha)
+
+design_filt_rarefy$ID <- rownames(design_filt_rarefy)
+
+idx_alpha <- rownames(alpha)%in% rownames(design_filt_rarefy)
+alpha <- alpha[idx_alpha,]
+design_filt_rarefy_alpha <- design_filt_rarefy[rownames(alpha),]
+alpha_merge <- merge(alpha,design_filt_rarefy_alpha,all=T)
+
+# save(alpha_merge,file ="../03.Output/03.diversity/alpha_merge.Rdata")
+
+```
+
+## chao1
+```{r}
+load(file ="../03.Output/03.diversity/alpha_merge.Rdata")
+
+p_alpha_chao1 <- ggplot(data=alpha_merge, aes(x=Group, y=chao1)) + 
+  geom_jitter(size=0.5,width=0.3, alpha=1, show.legend = T,aes(color=Group)) + 
+  geom_boxplot(width=0.4,outlier.size = 0.5,alpha=0,linewidth=0.2) +
+  stat_compare_means(  #label.x = NULL,
+                       label.y =700 ,size =4)+ 
+  theme(panel.background=element_rect(fill="white"),
+        panel.border = element_rect(fill=NA,size=0.1),
+        axis.title.x=element_blank(), 
+        axis.title.y=element_text(size=14), 
+        axis.line=element_line(size=0.1), 
+        axis.text.x=element_text(color='black', size=12), 
+        axis.text.y=element_text(color='black', size=12), 
+        axis.ticks =element_line(color='black', size=0.2),
+        axis.ticks.length=unit(0.05, "cm"),
+        legend.position = "top",
+        legend.title=element_text(color='black', size=14),
+        legend.text=element_text(color='black', size=12),
+        legend.key = element_blank(),
+        title = element_text(color='black', size=14));p_alpha_chao1
+
+# ggsave(path="../03.Output/03.diversity","alpha_chao1_group.pdf",p_alpha_chao1,width = 3, height = 3)
+
+
+```
+
+## shannon
+```{r}
+load(file ="../03.Output/03.diversity/alpha_merge.Rdata")
+
+p_alpha_shannon <- ggplot(data=alpha_merge, aes(x=Group, y=shannon)) + 
+  geom_jitter(size=0.5,width=0.3, alpha=1, show.legend = T,aes(color=Group)) + 
+  geom_boxplot(width=0.4,outlier.size = 0.5,alpha=0,linewidth=0.2) +
+  stat_compare_means(  #label.x = NULL,
+                       label.y =8 ,size =2.5)+ 
+  theme(panel.background=element_rect(fill="white"),
+        panel.border = element_rect(fill=NA,size=0.1),
+        axis.title.x=element_blank(), 
+        axis.title.y=element_text(size=9), 
+        axis.line=element_line(size=0.1), 
+        axis.text.x=element_text(color='black', size=8), 
+        axis.text.y=element_text(color='black', size=7), 
+        axis.ticks =element_line(color='black', size=0.2),
+        axis.ticks.length=unit(0.05, "cm"),
+        legend.position = "top",
+        legend.title=element_text(color='black', size=8),
+        legend.text=element_text(color='black', size=7),
+        legend.key = element_blank(),
+        title = element_text(color='black', size=8));p_alpha_shannon
+
+# ggsave(path="../03.Output/03.diversity","alpha_shannon_group.pdf",p_alpha_shannon,width = 5.5, height = 6.5,units = "cm")
+
+```
+
+# 3.beta diversity
+```{r}
+
+otu.distance<- vegdist(otu_Flattening_t,method="bray") 
+beta_bray <- as.matrix(otu.distance)
+
+idx_bray = rownames(design_filt_rarefy) %in% rownames(beta_bray)
+design_filt_rarefy_bray=design_filt_rarefy[idx_bray,]
+beta_bray=beta_bray[rownames(design_filt_rarefy_bray),rownames(design_filt_rarefy_bray)]
+
+sub_dis_table <- as.dist(beta_bray, diag = FALSE, upper = FALSE)
+
+adonis_table = adonis2(beta_bray~Group, data=design_filt_rarefy_bray, permutations = 10000) 
+adonis_pvalue = adonis_table$`Pr(>F)`[1]
+adonis_pvalue   
+
+R2 <- round(adonis_table$R2[1], 3)
+pvalue <- round(adonis_table$`Pr(>F)`[1], 2)
+  
+pcoa = cmdscale(beta_bray, k=4, eig=T)
+
+points <- as.data.frame(pcoa$points) 
+eig = pcoa$eig
+points = cbind(points, design_filt_rarefy_bray$Group,design_filt_rarefy_bray$Batch,design_filt_rarefy_bray$Patient)
+
+colnames(points) = c("PC1", "PC2", "PC3", "PC4","Group") 
+
+p_bray = ggplot(points, aes(x=PC1, y=PC2, color=Group)) + geom_point(alpha=1, size=1) +
+  labs(x=paste("PCoA 1 (", format(100 * eig[1] / sum(eig), digits=4), "%)", sep=""),
+       y=paste("PCoA 2 (", format(100 * eig[2] / sum(eig), digits=4), "%)", sep="")) + 
+  annotate('text', label = paste0("PERMANOVA R2 = ",R2 ,"\n","p = ", pvalue, sep = ""),
+           x = -0.2, y = -0.3, size = 3,hjust = 0.5) +
+  guides(color = FALSE)+
+  theme(panel.background=element_rect(fill="white"),
+        panel.border = element_rect(fill=NA,size=0.1),
+        axis.title.x=element_text(size=14), 
+        axis.title.y=element_text(size=14), 
+        axis.line=element_line(size=0.1), 
+        axis.text.x=element_text(color='black', size=12), 
+        axis.text.y=element_text(color='black', size=12), 
+        axis.ticks =element_line(color='black', size=0.2),
+        axis.ticks.length=unit(0.05, "cm"),
+        legend.title=element_text(color='black', size=14),
+        legend.text=element_text(color='black', size=12),
+        title = element_text(color='black', size=14)) + 
+        stat_ellipse(level=0.95);p_bray
+
+# ggsave(path="../03.Output/03.diversity","beta_group.pdf",p_bray,width = 3, height = 2.7)
+```
+
+# 4.Dendrogram analysis
+```{r}
+dir.create("../03.Output/03.diversity/Dendrogram")
+
+ps.rarefied.asv
+(ps.rarefied.asv.tumor <- subset_samples(ps.rarefied.asv,Group=="Tumor")) 
+(ps.rarefied.asv.tumor  <- prune_taxa(taxa_sums(ps.rarefied.asv.tumor ) > 0, ps.rarefied.asv.tumor ))
+
+otu_Flattening <- otu_table(ps.rarefied.asv.tumor)%>% data.frame 
+otu_Flattening_t <- t(otu_Flattening) %>% data.frame
+otu_Flattening_t$Patient <- design_filt_rarefy[rownames(otu_Flattening_t),]$Patient
+otu_Flattening_t$Group2 <- design_filt_rarefy[rownames(otu_Flattening_t),]$Group2
+
+cust_label <- read.csv("../03.Output/03.diversity/cust_label.csv")
+cust_label <- cust_label %>% as.data.frame()
+colnames(cust_label) <- c("name_change","name")
+
+otu_Flattening_t <- merge(otu_Flattening_t,cust_label,by.x="Patient",by.y="name_change")
+rownames(otu_Flattening_t) <- paste0(otu_Flattening_t$name,otu_Flattening_t$Group2)
+otu_Flattening_t <- otu_Flattening_t[,-which(colnames(otu_Flattening_t) %in% c("Patient","Group2","name"))]
+
+otu.distance<- vegdist(otu_Flattening_t,method="bray") 
+
+hc <- hclust(otu.distance, "ward.D2")
+
+plot(hc, xlab="", ylab="", main="", sub="")
+
+pdf("../03.Output/03.diversity/Dendrogram/beta_dendrogram_tumor1.pdf",width = 18/2.54,height =6/2.54)
+par(cex=0.3, mar=c(0, 0, 0, 0))
+plot(hc, xlab="", ylab="", main="", sub="", axes=FALSE,lwd = 1)
+# par(cex=1)
+# title(xlab="xlab", ylab="ylab", main="main")
+# axis(2)
+dev.off()
+
+pdf("../03.Output/03.diversity/Dendrogram/beta_dendrogram_tumor2.pdf",width = 10/2.54,height =10/2.54)
+# fan
+par(cex=0.6, mar=c(0, 0, 0, 0))
+plot(as.phylo(hc), type = "fan")
+dev.off()
+
+# Demonstrate plotting directly from object class hclust
+p <- ggdendrogram(hc, rotate = FALSE)
+print(p)
+ggsave("../03.Output/03.diversity/Dendrogram/beta_dendrogram_tumor3.pdf",width = 18, height = 10,units = "cm")
+
+p <- ggdendrogram(hc, rotate = TRUE) #+ labs(title = "Dendrogram in ggplot2")
+print(p)
+ggsave(path=output_dir,"beta_dendrogram_tumor.pdf",p,width = 10, height = 30)
+
+```
+
+# 5.phylum
+```{r}
+(ps.rarefied.Phylum <- aggregate_taxa(ps.rarefied.asv, "Phylum"))  
+ps <- microbiome::transform(ps.rarefied.Phylum,"compositional")
+
+##
+metadata <- sample_data(ps) %>% data.frame()
+otutable <- otu_table(ps) %>% data.frame()
+taxtable <- tax_table(ps) %>% data.frame()
+
+#phylum 
+otutable$taxa <- rownames(otutable)
+
+otutable <- aggregate(otutable[,1:300],by=list(otutable$taxa),FUN=sum)
+otutable <- otutable %>%
+  tibble::column_to_rownames(var="Group.1")
+
+mean_sort_filt = otutable[(order(-rowSums(otutable))), ] 
+colSums(mean_sort_filt)
+rownames(mean_sort_filt)[1:11]
+
+#phylum
+mean_sort_filt=as.data.frame(mean_sort_filt)
+other_filt = colSums(mean_sort_filt[c(6:dim(mean_sort_filt)[1]), ])
+mean_sort_filt = mean_sort_filt[c(1:5), ]
+mean_sort_filt= rbind(mean_sort_filt,other_filt)
+rownames(mean_sort_filt)[6] = c("Others")
+colSums(mean_sort_filt)
+rowMeans(mean_sort_filt)
+
+# Public file 1. "design.txt"  Design of experiment
+metadata$Patient <- factor(metadata$Patient,levels = as.data.frame(rev(sort(table(metadata$Patient))))$Var1)
+metadata <- metadata[order(metadata$Patient),]
+idx = rownames(metadata) %in% colnames(mean_sort_filt) 
+metadata= metadata[idx,]
+mean_sort_filt = mean_sort_filt[, rownames(metadata)]
+
+data_all_filt <- mean_sort_filt %>% as.data.frame() %>% 
+  tibble::rownames_to_column(var="Phylum") %>%
+  reshape2::melt(id.vars="Phylum") %>% 
+  merge(.,metadata[,c("ID","Patient","Group2")],by.x="variable",by.y="ID",sort=FALSE) 
+
+data_all_filt$Phylum <- as_factor(data_all_filt$Phylum)
+data_all_filt$Group2 <- factor(data_all_filt$Group2,levels = c("L","T1","T2",
+                                                               "T3","T4","T5",
+                                                               "T6","T7","T8",
+                                                               "T9","T10","T11"))
+
+data_all_filt$Group2 <- as.character(data_all_filt$Group2)
+data_all_filt$Group2 <- ifelse(data_all_filt$Group2=="L","N",data_all_filt$Group2)
+data_all_filt$Group2 <- factor(data_all_filt$Group2,levels = c("N","T1","T2",
+                                                               "T3","T4","T5",
+                                                               "T6","T7","T8",
+                                                               "T9","T10","T11"))
+# phylum
+col <-c(  "#BC80BD", "#FFFFB3", "#BEBADA","#B3DE69","#FCCDE5",
+          "#8DD3C7")
+
+# cust_label <- setNames(paste0("HCC",seq(1:58)),names(table(data_all_filt$Patient)))
+# write.csv(cust_label,"../03.Output/03.diversity/cust_label.csv" )
+# save(cust_label,file="../03.Output/03.diversity/cust_label.Rdata")
+
+load(file="../03.Output/03.diversity/cust_label.Rdata")
+
+p_comp = ggplot(data = data_all_filt, aes(x=Group2, y = value,alluvium = Phylum, stratum = Phylum)) + 
+  geom_alluvium(aes(fill = Phylum),width=0.4,alpha=0.9)+ #,curve_type = "linear"
+  geom_stratum(aes(fill = Phylum),linetype=0,width = 0.6,alpha=0.1)+
+  scale_fill_manual(values = col) +
+  geom_vline(xintercept =1,col='white', lwd=0.1) +
+  xlab("")+ 
+  scale_x_discrete(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0))+
+  ylab("Relative abundance (%)") +
+  guides(fill=guide_legend(title="Phylum",nrow = 1)) +
+  facet_wrap(~Patient,scale="free_x",ncol=15,labeller = as_labeller(cust_label)) +
+  theme(panel.background=element_blank(),
+        panel.border = element_rect(fill=NA,size=0.1),
+        panel.spacing.x = unit(0.05,"cm"),
+        axis.text.x= element_blank(), #element_text(color='black', size=3), 
+        axis.text.y=element_text(color='black', size=12), 
+        axis.ticks.length =unit(0.05, "cm"),
+        axis.ticks = element_line(color='black', size=0.1),
+        axis.ticks.x = element_blank(),
+        axis.title.y = element_text(color='black', size=14), 
+        legend.position="top",
+        legend.title=element_text(color='black', size=14),
+        legend.text=element_text(color='black', size=12,face="italic"),
+        legend.key=element_blank(),
+        legend.key.height = unit(8, "pt"),
+        legend.key.width  = unit(8, "pt"),
+        strip.text = element_text(size=12), 
+        strip.background = element_blank()) 
+p_comp 
+
+# ggsave(path="../03.Output/03.diversity","phylum_patients_alluvium_w.pdf", p_comp , width = 11, height = 4.5)
+
+```
+
+
+# 6.genus
+```{r}
+(ps.rarefied.Genus <- aggregate_taxa(ps.rarefied.asv, "Genus"))
+ps <- microbiome::transform(ps.rarefied.Genus,"compositional")
+
+##
+metadata <- sample_data(ps) %>% data.frame()
+otutable <- otu_table(ps) %>% data.frame()
+taxtable <- tax_table(ps) %>% data.frame()
+
+#genus
+taxtable <- taxtable %>%
+  mutate(taxa=ifelse(Genus=="g__unassign","Others",Genus)) 
+otutable <- otutable[rownames(taxtable),]
+otutable$taxa <- taxtable$taxa
+
+otutable <- aggregate(otutable[,1:300],by=list(otutable$taxa),FUN=sum)
+otutable <- otutable %>%
+  tibble::column_to_rownames(var="Group.1")
+
+mean_sort_filt = otutable[(order(-rowSums(otutable))), ] # decrease sort
+colSums(mean_sort_filt)
+rownames(mean_sort_filt)[1:11]
+
+#
+mean_sort_filt=as.data.frame(mean_sort_filt)
+other_filt = colSums(mean_sort_filt[c(1,7:dim(mean_sort_filt)[1]), ])
+mean_sort_filt = mean_sort_filt[c(2:6), ]
+mean_sort_filt= rbind(mean_sort_filt,other_filt)
+rownames(mean_sort_filt)[6] = c("Others")
+colSums(mean_sort_filt)
+rowMeans(mean_sort_filt)
+
+# Public file 1. "design.txt"  Design of experiment
+metadata$Patient <- factor(metadata$Patient,levels = as.data.frame(rev(sort(table(metadata$Patient))))$Var1)
+metadata <- metadata[order(metadata$Patient),]
+idx = rownames(metadata) %in% colnames(mean_sort_filt) 
+metadata= metadata[idx,]
+mean_sort_filt = mean_sort_filt[, rownames(metadata)] # reorder according to design
+
+data_all_filt <- mean_sort_filt %>% as.data.frame() %>% 
+  tibble::rownames_to_column(var="Genus") %>%
+  reshape2::melt(id.vars="Genus") %>% 
+  merge(.,metadata[,c("ID","Patient","Group2")],by.x="variable",by.y="ID",sort=FALSE) 
+
+data_all_filt$Genus <- as_factor(data_all_filt$Genus)
+data_all_filt$Group2 <- factor(data_all_filt$Group2,levels = c("L","T1","T2",
+                                                               "T3","T4","T5",
+                                                               "T6","T7","T8",
+                                                               "T9","T10","T11"))
+
+# genus
+col <-c(  "#BC80BD", "#FFFFB3", "#BEBADA", "#FB8072", "#80B1D3",
+          # "#FDB462", "#B3DE69", "#FCCDE5", "#CCEBC5","#D9D9D9",
+          "#8DD3C7")
+
+data_all_filt$Group2 <- as.character(data_all_filt$Group2)
+data_all_filt$Group2 <- ifelse(data_all_filt$Group2=="L","N",data_all_filt$Group2)
+data_all_filt$Group2 <- factor(data_all_filt$Group2,levels = c("N","T1","T2",
+                                                               "T3","T4","T5",
+                                                               "T6","T7","T8",
+                                                               "T9","T10","T11"))
+
+p_comp = ggplot(data = data_all_filt, aes(x=Group2, y = value,alluvium = Genus, stratum = Genus)) + 
+  geom_alluvium(aes(fill = Genus),width=0.4,alpha=0.9)+ #,curve_type = "linear"
+  geom_stratum(aes(fill = Genus),linetype=0,width = 0.6,alpha=0.1)+
+  scale_fill_manual(values = col) +
+  geom_vline(xintercept =1,col='white', lwd=0.1) +
+  xlab("")+ 
+  scale_x_discrete(expand = c(0, 0)) +
+  scale_y_continuous(expand = c(0, 0))+
+  ylab("Relative abundance (%)") +
+  guides(fill=guide_legend(title="Genus",nrow = 1)) +
+  facet_wrap(~Patient,scale="free_x",ncol=15,labeller = as_labeller(cust_label)) +
+  theme(panel.background=element_blank(),
+        panel.border = element_rect(fill=NA,size=0.1),
+        panel.spacing.x = unit(0.05,"cm"),
+        axis.text.x= element_blank(), #element_text(color='black', size=3), 
+        axis.text.y=element_text(color='black', size=12), 
+        axis.ticks.length =unit(0.05, "cm"),
+        axis.ticks = element_line(color='black', size=0.1),
+        axis.ticks.x = element_blank(),
+        axis.title.y = element_text(color='black', size=14), 
+        legend.position="top",
+        legend.title=element_text(color='black', size=14),
+        legend.text=element_text(color='black', size=12,face="italic"),
+        legend.key=element_blank(),
+        legend.key.height = unit(8, "pt"),
+        legend.key.width  = unit(8, "pt"),
+        strip.text = element_text(size=12), #hcc
+        strip.background = element_blank()) 
+p_comp 
+
+# ggsave(path="../03.Output/03.diversity","genus_patients_alluvium.pdf", p_comp ,width = 9.5, height = 4.8)
+
+```
+
+# 7.lefse
+```{r}
+
+ps.HVM.filt <-ps.species
+otu_filt_diff <- otu_table(ps.HVM.filt) %>% data.frame()     
+design_filt_diff <- sample_data(ps.HVM.filt)  %>% data.frame()  
+
+library(microbiomeMarker)
+set.seed(12)
+mm <- microbiomeMarker:: run_lefse(
+  ps.HVM.filt,
+  group='Group', 
+  taxa_rank = "Genus",
+  subgroup = NULL,
+  norm = "CPM",
+  wilcoxon_cutoff = 0.05, 
+  bootstrap_n = 50, 
+  lda_cutoff = 3 # 
+) 
+
+mm@marker_table[mm@marker_table$enrich_group=="Adjacent",]$ef_lda <- 0-mm@marker_table[mm@marker_table$enrich_group=="Adjacent",]$ef_lda
+
+cols <- RColorBrewer::brewer.pal(8, "Dark2")
+
+mm %>% marker_table() %>% data.frame() -> res.diff.all.unfilt 
+res.diff.all.unfilt  %>% 
+  write_excel_csv(file = "../03.Output/03.diversity/res.diff.species.unfilt.csv")
+
+pdf("../03.Output/03.diversity/lefse_genus_tumor_adjacent.pdf",width = 3.5, height = 3.1) #/2.54
+plot_ef_bar(mm, label_level = 2 ) +
+   coord_cartesian(xlim = c(-4.5, 4.5))+
+  scale_x_continuous(breaks=c(-4, 0, 4))+
+  theme(panel.background=element_rect(fill="white"),
+      panel.border = element_rect(fill=NA,size=0.2),
+      axis.title.x=element_text(size=14), 
+      axis.title.y=element_blank(), 
+      axis.text.x=element_text(color='black', size=12), 
+      axis.text.y =element_text(color="black", size=12,face="italic"),
+      axis.ticks.length =unit(0.05, "cm"),
+      axis.ticks = element_line(color='black', size=0.2),
+      legend.position = "top",
+      legend.key=element_blank(),
+      legend.key.height = unit(7, "pt"),
+      legend.key.width  = unit(7, "pt"),
+      legend.title=element_text(color='black', size=14),
+      legend.text=element_text(color='black', size=12),
+      title = element_text(color='black', size=14))
+dev.off()
+
+```
+
+# 8.wilcoxon
+```{r}
+
+otu_filt_diff <- otu_table(ps.HVM.filt) %>% data.frame()     
+design_filt_diff <- sample_data(ps.HVM.filt)  %>% data.frame()  
+
+dat <- otu_filt_diff %>%
+  tibble::rownames_to_column(var="asv")%>%
+  transform(asv = factor(asv))
+## foldchange
+dat1 <- otu_filt_diff %>%
+  tibble::rownames_to_column(var="asv") %>% 
+  pivot_longer(-asv, names_to = 'ID', values_to = 'value') %>% 
+  left_join(design_filt_diff[,c("ID","Group")], by = 'ID')
+head(dat1)
+dat2 <- dat1 %>%
+  mutate(value1=(value>0)*1) %>%
+  group_by(asv,Group)%>%
+  summarise(prev=count(value1)/length(value1) ,.groups = "keep") %>% 
+  pivot_wider(names_from = Group, values_from = prev) #%>% 
+  # rename( "MO.prev" = MO, "IM.prev" = IM)
+#
+dat_FC1 <- dat1 %>% group_by(asv,Group) %>%  
+  summarise(median=median(value,na.rm=T),.groups = "keep") %>% 
+  pivot_wider(names_from = Group, values_from = median) #%>% 
+  #mutate("median_Foldchange_IM_MO"=IM/MO)
+dat_FC2 <- dat1 %>% group_by(asv,Group) %>% 
+  summarise(mean=mean(value,na.rm=T),.groups = "keep") %>% 
+  pivot_wider(names_from = Group, values_from = mean) %>% 
+  mutate("Foldchange_T_A"=Tumor/Adjacent) 
+  #mutate("Foldchange_T_A"=Tumor/Adjacent) %>%
+  #dat_FC[dat_FC==0] <- 0.00001 %>% 
+  # summarise("Foldchange_IM_MO"=IM/MO)
+head(dat_FC2)
+
+dat3 <- otu_filt_diff %>%
+  t() %>%
+  as.data.frame()
+asv <- colnames(dat3)
+dat_normal_condition <- dat3 %>% 
+  shapiro_test(asv) %>%
+  mutate(Normal_Distribution = case_when(p > 0.05 ~ 'YES', TRUE ~ 'NO')) %>% 
+  select(asv=variable,Normal_Distribution) %>% 
+  merge(dat,by="asv")
+head(dat_normal_condition)
+
+# dat_ttest <- dat_normal_condition %>% 
+#   filter(Normal_Distribution=="YES") %>% #normal distribution
+#   select(-Normal_Distribution) %>% 
+#   pivot_longer(-met, names_to = 'sample.name', values_to = 'value') %>% 
+#   left_join(meta, by = 'sample.name') %>% 
+#   group_by(met) %>%
+#   t_test(value ~ group) %>% #t_test
+#   adjust_pvalue(method = 'fdr') %>% 
+#   filter(group1=="IN",group2=="QH") %>%# A vs B
+# select(-(group1:group2)) %>% 
+#   select(c('met','p','p.adj')) %>%  #,'p.adj.signif'
+#   rename(`P_value` = p, FDR = p.adj)  #,signif=p.adj.signif
+# head(dat_ttest)
+
+dat_wttest <- dat_normal_condition %>% 
+  filter(Normal_Distribution=="NO") %>% #non-normal distribution
+  select(-Normal_Distribution) %>% 
+  pivot_longer(-asv, names_to = 'ID', values_to = 'value') %>% 
+  left_join(design_filt_diff[,c("ID","Group")], by = 'ID') %>%  #"nodule","Group"
+  transform(asv = factor(asv))%>%
+  group_by(asv) %>%
+  rstatix::wilcox_test(value ~ Group) %>% ##"nodule","Group"
+  adjust_pvalue(method = 'fdr') %>% 
+  filter(group1=="Adjacent",group2=="Tumor") %>%# A vs B-- Adjacent Tumor
+  select(-(group1:group2)) %>% 
+  select(c('asv','p','p.adj')) %>% #,'p.adj.signif'
+  dplyr::rename("wt.p" = "p", "wt.FDR" = "p.adj")   #,signif=p.adj.signif
+head(dat_wttest)
+### ks.test
+OTU1 <- otu_filt_diff %>% data.frame() %>%t() 
+OTU <- OTU1 %>% data.frame()
+colnames(OTU) <- colnames(OTU1)
+OTU$group <- design_filt_diff$Group
+result.ks <- list()
+for (i in 1:122){ 
+  #print(i)
+  print(colnames(OTU)[i])
+  result.ks[[i]] <- ks.test(OTU[,i]~OTU$group,OTU)
+  names(result.ks)[[i]] <- colnames(OTU)[i]
+}
+result.ks_1 <-do.call(rbind,result.ks) %>% data.frame
+result.ks_2 <- result.ks_1 %>%
+  tibble::rownames_to_column(var="asv") %>%
+  adjust_pvalue(method = 'fdr') %>%
+  select(c('asv','p.value','p.value.adj')) %>% #,'p.adj.signif'
+  rename("p.value" = "ks.p", "p.value.adj" = "ks.FDR") %>%
+  unnest(c(asv, ks.p, ks.FDR))
+
+dat_result <- dat2 %>%
+  merge(dat_FC1,by="asv") %>% #full_join(dat_wttest) %>% 
+  merge(dat_FC2,by="asv") %>%
+  merge(dat_wttest,by="asv") %>%
+  merge(result.ks_2,by="asv") %>%
+  write_excel_csv(file = "../03.Output/03.diversity/wilcoxon_genus_tumor_adjacent.csv")
+
+
+a <- dat_result[dat_result$Foldchange_T_A>1 & dat_result$wt.p<0.05,] %>% view() %>%
+  write_excel_csv(file = "../03.Output/03.diversity/wilcoxon_genus_tumor_adjacent_p.csv")
+
+
+```
+
+
+

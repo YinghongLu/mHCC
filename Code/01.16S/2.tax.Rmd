@@ -1,0 +1,303 @@
+---
+title: "2.tax"
+author: "yinghong"
+date: "2024-04-23"
+output: html_document
+---
+
+# rarefy curve
+```{r}
+dir.create("../03.Output/02.tax")
+
+load(file ="../03.Output/02.tax/physeq.decontam.Rdata")
+
+# rarefy and convert to relative abundance
+sort(colSums(otu_table(physeq.decontam)))
+
+# set seed
+set.seed(1)
+p.rcurve <- plot_alpha_rcurve(physeq.decontam, index="observed", 
+                              subsamples = seq(0, 10000, by=1000),
+                              type = "SD",
+                              linetype.type=1,
+                              line.opacity.type=0,
+                              group="Sample1", 
+                              label.color = "brown3",
+                              label.size = 0.5,
+                              label.min = F) 
+
+p.rcurve <- p.rcurve +
+  guides(color = FALSE)+
+  labs(x = 'Sequencing depth', y = 'Observed features')+
+  annotate('text', label = "x = 1880 ",
+           x = 1000, y = 700, size = 4) +
+  geom_vline(xintercept = 1880, linetype = "dashed", colour = "black",show.legend = T,size=0.2) +
+  theme(panel.background=element_rect(fill="white"),
+        panel.border = element_rect(fill=NA,size=0.1),
+        # aspect.ratio = 0.5,
+        axis.title.x=element_text(size=14), 
+        axis.title.y=element_text(size=14), 
+        axis.line=element_line(size=0.1), 
+        axis.text.x=element_text(color='black', size=12), 
+        axis.text.y=element_text(color='black', size=12), 
+        axis.ticks =element_line(color='black', size=0.2),
+        axis.ticks.length=unit(0.05, "cm"),
+        legend.title=element_text(color='black', size=14),
+        legend.text=element_text(color='black', size=12),
+        title = element_text(color='black', size=14));print(p.rcurve)
+ggsave(path="../03.Output/02.tax","alpha_rcurve_sample_1880.pdf", p.rcurve , width = 3.5, height = 2.7)
+
+```
+
+# rarefy
+```{r}
+
+set.seed(300)
+ps.rarefied <- rarefy_even_depth(physeq.decontam.manual, sample.size=1880, rngseed=nsamples(physeq.decontam.manual)) 
+colSums(otu_table(ps.rarefied ))
+
+## ASV
+(ps.rarefied.asv <- prune_taxa(taxa_sums(ps.rarefied) > 0, ps.rarefied))
+colSums(otu_table(ps.rarefied.asv ))
+
+save(ps.rarefied.asv,file ="../03.Output/02.tax/ps.rarefied.asv.Rdata")
+
+```
+
+# unrarefy
+```{r}
+(ps.unrarefied.asv <- prune_taxa(taxa_sums(physeq.decontam.manual) > 0, physeq.decontam.manual)) 
+sort(colSums(otu_table(ps.unrarefied.asv)))
+
+metadata <- sample_data(ps.unrarefied.asv) %>% data.frame()
+
+save(ps.unrarefied.asv,file ="../03.Output/02.tax/ps.unrarefied.asv.de.Rdata")
+
+## 
+ps.unrarefied.asv 
+(ps.unrarefied.Species <- aggregate_taxa(ps.unrarefied.asv, "Species"))   
+(ps.unrarefied.Genus <- aggregate_taxa(ps.unrarefied.asv, "Genus"))  
+(ps.unrarefied.Phylum <- aggregate_taxa(ps.unrarefied.asv, "Phylum"))  
+
+
+# save(ps.unrarefied.Species,file ="../03.Output/02.tax/ps.unrarefied.species.Rdata") 
+# save(ps.unrarefied.Genus,file ="../03.Output/02.tax/ps.unrarefied.genus.Rdata") 
+# save(ps.unrarefied.Phylum,file ="../03.Output/02.tax/ps.unrarefied.phylum.Rdata") 
+
+```
+
+## ASV
+```{r}
+load(file ="../03.Output/02.tax/ps.unrarefied.asv.Rdata")
+
+ps.unrarefied.count <- ps.unrarefied.asv
+
+(ps.unrarefied.re <- microbiome::transform(ps.unrarefied.count, "compositional"))  
+
+(ps.unrarefied.re.0.1 <- core(ps.unrarefied.re,detection = 0.00001,prevalence = 0.01))
+
+ps.unrarefied.count.0.1 <- ps.unrarefied.count
+tax_table(ps.unrarefied.count.0.1 )<- tax_table(ps.unrarefied.re.0.1)
+ps.unrarefied.count.0.1
+
+(ps.unrarefied.count.0.1.asv <- ps.unrarefied.count.0.1)
+(ps.unrarefied.re.0.1.asv <-ps.unrarefied.re.0.1)
+
+view(tax_table(ps.unrarefied.count.0.1.asv))
+
+ps.asv <- ps.unrarefied.count.0.1.asv 
+ps.asv
+
+
+```
+
+## species
+```{r}
+load(file ="../03.Output/02.tax/ps.unrarefied.species.Rdata")
+
+ps.unrarefied.count <- ps.unrarefied.Species
+
+(ps.unrarefied.re <- microbiome::transform(ps.unrarefied.count, "compositional"))  
+
+(ps.unrarefied.re.0.1 <- core(ps.unrarefied.re,detection = 0.001,prevalence = 0.1)) 
+
+ps.unrarefied.count.0.1 <- ps.unrarefied.count
+tax_table(ps.unrarefied.count.0.1 )<- tax_table(ps.unrarefied.re.0.1)
+ps.unrarefied.count.0.1
+
+(ps.unrarefied.count.0.1.Species <- ps.unrarefied.count.0.1)
+(ps.unrarefied.re.0.1.Species <-ps.unrarefied.re.0.1)
+
+view(tax_table(ps.unrarefied.count.0.1.Species))
+
+ps.species <- ps.unrarefied.count.0.1.Species
+ps.species
+tax_table(ps.species) <- tax_table(ps.species)[,1:7]
+
+save(ps.species,file="../03.Output/02.tax/ps.unrarefied.species.filt.Rdata")
+
+```
+
+### nodule
+```{r}
+dir.create("../03.Output/02.tax/species")
+
+load("../03.Output/02.tax/ps.unrarefied.species.filt.Rdata")
+
+## filt
+(ps.species.filt.rna <- subset_samples(ps.species,ID %in% metadata_rna$ID))
+sample_data(ps.species.filt.rna) <- sample_data(metadata_rna)
+(ps.species.filt.rna <- prune_taxa(taxa_sums(ps.species.filt.rna) > 0, ps.species.filt.rna))
+tax_table(ps.species.filt.rna) <- tax_table(ps.species.filt.rna)[,1:7]
+# save(ps.species.filt.rna,file = "../03.Output/02.tax/species/ps.species.filt.rna.Rdata")
+
+## MIX
+(ps.species.mix.rna <- subset_samples(ps.species,ID %in% metadata_mix_rna$ID))
+sample_data(ps.species.mix.rna) <- sample_data(metadata_mix_rna)
+(ps.species.mix.rna <- prune_taxa(taxa_sums(ps.species.mix.rna) > 0, ps.species.mix.rna))
+tax_table(ps.species.mix.rna) <- tax_table(ps.species.mix.rna)[,1:7]
+# save(ps.species.mix.rna,file = "../03.Output/02.tax/species/ps.species.mix.rna.Rdata")
+
+## nodule
+(ps.species.nodule.rna <- subset_samples(ps.species,ID %in% metadata_nodule_rna$ID))
+sample_data(ps.species.nodule.rna) <- sample_data(metadata_nodule_rna)
+(ps.species.nodule.rna <- prune_taxa(taxa_sums(ps.species.nodule.rna) > 0, ps.species.nodule.rna))
+tax_table(ps.species.nodule.rna) <- tax_table(ps.species.nodule.rna)[,1:7]
+# save(ps.species.nodule.rna,file = "../03.Output/02.tax/species/ps.species.nodule.rna.Rdata")
+
+sd_filter_genes <- function(genes, qt){
+  genes.sd <- base::transform(as.data.frame(genes), SD=apply(as.data.frame(genes),1,sd, na.rm = TRUE))
+  ## select top genes with high SD (~ variability) across samples
+  SD_quantile <- quantile(genes.sd$SD) ## identical to summary(genes.sd$SD)
+  SD_cutoff <- SD_quantile[qt] ## 2nd quantile -- 25th quantile.
+  genes.sd <- genes.sd[order(genes.sd$SD, decreasing = T),]
+  top.variable.genes <- rownames(genes.sd[genes.sd$SD > SD_cutoff,])
+  ## subset these genes from gene table
+  select <- which(rownames(genes) %in% top.variable.genes)
+  genes <- genes[select,]
+}
+# 
+ps <- ps.species.nodule.rna
+
+metadata <- sample_data(ps) %>% as.data.frame()
+otutable <- otu_table(ps) %>% as.data.frame()
+taxtable <- tax_table(ps) %>% as.data.frame()
+
+otutable_filt <- sd_filter_genes(otutable,2);dim(otutable_filt) 
+taxtable_filt <- taxtable[rownames(otutable_filt),]
+
+OTU = otu_table(as.matrix(otutable_filt), taxa_are_rows = TRUE)
+TAX = tax_table(as.matrix(taxtable_filt))
+samples = sample_data(metadata)
+
+ps.species.nodule.rna_sdfilt <- phyloseq(OTU, TAX, samples)
+ps.species.nodule.rna_sdfilt
+# save(ps.species.nodule.rna_sdfilt,file = "../03.Output/02.tax/species/ps.species.nodule.rna_sdfilt.Rdata")
+
+## IM
+(ps.species.IM.rna <- subset_samples(ps.species.nodule.rna,ID %in% metadata_IM_rna$ID))
+(ps.species.IM.rna <- prune_taxa(taxa_sums(ps.species.IM.rna) > 0, ps.species.IM.rna))
+tax_table(ps.species.IM.rna) <- tax_table(ps.species.IM.rna)[,1:7]
+# save(ps.species.IM.rna,file = "../03.Output/02.tax/species/ps.species.IM.rna_nofilt.Rdata")
+
+(ps.species.IM.rna.clr <- microbiome::transform(ps.species.IM.rna, "clr"))
+otutable_species.IM.clr <- otu_table(ps.species.IM.rna.clr) %>% data.frame()
+# write.csv(otutable_species.IM.clr,"../03.Output/02.tax/species/count_otutable_species_rna_IM_clr_nofilt.csv")
+
+(ps.species.IM.rna_sdfilt <- subset_samples(ps.species.nodule.rna_sdfilt,ID %in% metadata_IM_rna$ID))
+(ps.species.IM.rna_sdfilt <- prune_taxa(taxa_sums(ps.species.IM.rna_sdfilt) > 0, ps.species.IM.rna_sdfilt))
+tax_table(ps.species.IM.rna_sdfilt) <- tax_table(ps.species.IM.rna_sdfilt)[,1:7]
+# save(ps.species.IM.rna_sdfilt,file = "../03.Output/02.tax/species/ps.species.IM.rna_sdfilt.Rdata")
+
+(ps.species.IM.rna.clr_sdfilt <- microbiome::transform(ps.species.IM.rna_sdfilt, "clr"))
+otutable_species.IM.clr_sdfilt <- otu_table(ps.species.IM.rna.clr_sdfilt) %>% data.frame()
+# write.csv(otutable_species.IM.clr_sdfilt,"../03.Output/02.tax/species/count_otutable_species_rna_IM_clr_sdfilt.csv")
+
+(ps.species.MO.rna <- subset_samples(ps.species.nodule.rna,ID %in% metadata_MO_rna$ID))
+(ps.species.MO.rna <- prune_taxa(taxa_sums(ps.species.MO.rna) > 0, ps.species.MO.rna))
+tax_table(ps.species.MO.rna) <- tax_table(ps.species.MO.rna)[,1:7]
+save(ps.species.MO.rna,file = "../03.Output/02.tax/species/ps.species.MO.rna_nofilt.Rdata")
+
+(ps.species.MO.rna.clr <- microbiome::transform(ps.species.MO.rna, "clr"))
+otutable_species.MO.clr <- otu_table(ps.species.MO.rna.clr) %>% data.frame()
+write.csv(otutable_species.MO.clr,"../03.Output/02.tax/species/count_otutable_species_rna_MO_clr_nofilt.csv")
+
+(ps.species.MO.rna_sdfilt <- subset_samples(ps.species.nodule.rna_sdfilt,ID %in% metadata_MO_rna$ID))
+(ps.species.MO.rna_sdfilt <- prune_taxa(taxa_sums(ps.species.MO.rna_sdfilt) > 0, ps.species.MO.rna_sdfilt))
+tax_table(ps.species.MO.rna_sdfilt) <- tax_table(ps.species.MO.rna_sdfilt)[,1:7]
+save(ps.species.MO.rna,file = "../03.Output/02.tax/species/ps.species.MO.rna_sdfilt.Rdata")
+
+(ps.species.MO.rna.clr_sdfilt <- microbiome::transform(ps.species.MO.rna_sdfilt, "clr"))
+otutable_species.MO.clr_sdfilt <- otu_table(ps.species.MO.rna.clr_sdfilt) %>% data.frame()
+write.csv(otutable_species.MO.clr_sdfilt,"../03.Output/02.tax/species/count_otutable_species_rna_MO_clr_sdfilt.csv")
+
+(ps.species.nodule.rna.adj <- subset_samples(ps.species,Group=="Adjacent")) 
+(ps.species.nodule.rna.adj <- subset_samples(ps.species.nodule.rna.adj,Patient %in% metadata_nodule_rna$Patient)) 
+(ps.species.nodule.rna.adj.diff <- merge_phyloseq(ps.species.nodule.rna,ps.species.nodule.rna.adj ))
+tax_table(ps.species.nodule.rna.adj.diff) <- tax_table(ps.species.nodule.rna.adj.diff)[,1:7]
+save(ps.species.nodule.rna.adj,file = "../03.Output/02.tax/species/ps.species.nodule.rna.adj.Rdata")
+
+(ps.species.IM.rna.adj <- subset_samples(ps.species,Group=="Adjacent")) 
+(ps.species.IM.rna.adj <- subset_samples(ps.species.IM.rna.adj,Patient %in% metadata_IM_rna$Patient)) 
+(ps.species.IM.rna.adj.diff <- merge_phyloseq(ps.species.IM.rna,ps.species.IM.rna.adj ))
+tax_table(ps.species.IM.rna.adj.diff) <- tax_table(ps.species.IM.rna.adj.diff)[,1:7]
+save(ps.species.IM.rna.adj.diff,file = "../03.Output/02.tax/species/ps.species.IM.rna.adj.diff.Rdata")
+
+```
+
+## genus
+```{r}
+load(file ="../03.Output/02.tax/ps.unrarefied.genus.Rdata")
+
+ps.unrarefied.count <- ps.unrarefied.Genus
+(ps.unrarefied.re <- microbiome::transform(ps.unrarefied.count, "compositional"))  
+(ps.unrarefied.re.0.1 <- core(ps.unrarefied.re,detection = 0.001,prevalence = 0.1)) 
+ps.unrarefied.count.0.1 <- ps.unrarefied.count
+tax_table(ps.unrarefied.count.0.1 )<- tax_table(ps.unrarefied.re.0.1)
+ps.unrarefied.count.0.1
+
+(ps.unrarefied.count.0.1.Genus <- ps.unrarefied.count.0.1)
+(ps.unrarefied.re.0.1.Genus <-ps.unrarefied.re.0.1)
+
+ps.genus <- ps.unrarefied.count.0.1.Genus  
+ps.genus
+tax_table(ps.genus) <- tax_table(ps.genus)[,1:6]
+save(ps.genus,file="../03.Output/02.tax/ps.unrarefied.genus.filt.Rdata")
+
+
+```
+
+### nodule
+```{r}
+dir.create("../03.Output/02.tax/genus")
+
+load("../03.Output/05.nodule/metadata_rna.Rdata")
+
+## filt
+(ps.genus.filt.rna <- subset_samples(ps.genus,ID %in% metadata_rna$ID))
+sample_data(ps.genus.filt.rna) <- sample_data(metadata_rna)
+(ps.genus.filt.rna <- prune_taxa(taxa_sums(ps.genus.filt.rna) > 0, ps.genus.filt.rna))
+tax_table(ps.genus.filt.rna) <- tax_table(ps.genus.filt.rna)[,1:6]
+save(ps.genus.filt.rna,file = "../03.Output/02.tax/genus/ps.genus.filt.rna.Rdata")
+
+## MIX
+(ps.genus.mix.rna <- subset_samples(ps.genus,ID %in% metadata_mix_rna$ID))
+sample_data(ps.genus.mix.rna) <- sample_data(metadata_mix_rna)
+(ps.genus.mix.rna <- prune_taxa(taxa_sums(ps.genus.mix.rna) > 0, ps.genus.mix.rna))
+tax_table(ps.genus.mix.rna) <- tax_table(ps.genus.mix.rna)[,1:6]
+save(ps.genus.mix.rna,file = "../03.Output/02.tax/genus/ps.genus.mix.rna.Rdata")
+
+## nodule
+(ps.genus.nodule.rna <- subset_samples(ps.genus,ID %in% metadata_nodule_rna$ID))
+sample_data(ps.genus.nodule.rna) <- sample_data(metadata_nodule_rna)
+(ps.genus.nodule.rna <- prune_taxa(taxa_sums(ps.genus.nodule.rna) > 0, ps.genus.nodule.rna))
+tax_table(ps.genus.nodule.rna) <- tax_table(ps.genus.nodule.rna)[,1:6]
+save(ps.genus.nodule.rna,file = "../03.Output/02.tax/genus/ps.genus.nodule.rna.Rdata")
+
+## IM
+(ps.genus.IM.rna <- subset_samples(ps.genus.nodule.rna,ID %in% metadata_IM_rna$ID))
+(ps.genus.IM.rna <- prune_taxa(taxa_sums(ps.genus.IM.rna) > 0, ps.genus.IM.rna))
+tax_table(ps.genus.IM.rna) <- tax_table(ps.genus.IM.rna)[,1:6]
+save(ps.genus.IM.rna,file = "../03.Output/02.tax/genus/ps.genus.IM.rna.Rdata")
+
+```

@@ -1,0 +1,862 @@
+---
+title: "7.caret"
+author: "yinghong"
+date: "2024-04-23"
+output: html_document
+---
+
+# load package
+```{r}
+library(caret) # for model-building
+library(DMwR) # for smote implementation remotes::install_github("cran/DMwR")
+library(purrr) # for functional programming (map)
+library(pROC) # for AUC calculations
+```
+
+# 1.Preprocess + split
+```{r}
+dir.create("../03.Output/07.caret")
+
+rm(list=ls())
+
+load(file = "../03.Output/02.tax/species/ps.species.nodule.rna.Rdata") 
+# 
+otu_filt_HVM_diff <- otu_table(ps.species.nodule.rna) %>% data.frame()     
+design_filt_HVM_diff <- sample_data(ps.species.nodule.rna)  %>% data.frame() 
+tax_filt_HVM_diff <- tax_table(ps.species.nodule.rna) %>% data.frame() 
+
+otu_filt_HVM_diff <- otu_filt_HVM_diff[rownames(tax_filt_HVM_diff),]
+rownames(otu_filt_HVM_diff) <- sapply(strsplit(rownames(otu_filt_HVM_diff),"ae;"),"[",2)
+otu_filt_HVM_diff_t <- t(otu_filt_HVM_diff)
+
+otu_group <- merge(otu_filt_HVM_diff_t,design_filt_HVM_diff[,c("ID","nodule")],by.x="row.names",by.y="row.names") %>%
+  tibble::column_to_rownames(var="Row.names")
+
+otu_group <- otu_group[,-which(colnames(otu_group) %in% c("ID"))]
+dim(otu_group) 
+table(otu_group$nodule)
+
+otu_group$nodule <- factor(otu_group$nodule,levels = c("IM","MO"))
+
+preProcValues <- preProcess(otu_group[,1:9], method = c("center", "scale","nzv"))
+transformed <- predict(preProcValues, newdata = otu_group[,1:12])
+transformed$nodule <- otu_group$nodule
+
+head(transformed)
+
+set.seed(3456)
+trainIndex <- createDataPartition(transformed$nodule, p = .6, 
+                                  list = FALSE,times = 1)
+head(trainIndex)
+
+otuTrain <- transformed[ trainIndex,] 
+dim(otuTrain)
+otuTest  <- transformed[-trainIndex,]
+dim(otuTest) 
+
+table(otuTrain$nodule)
+table(otuTest$nodule)
+
+```
+
+# 2.ROC
+## ROC cv
+```{r}
+library(doParallel)
+## Loading required package: foreach
+## Loading required package: iterators
+## Loading required package: parallel
+cl <- makePSOCKcluster(8)
+registerDoParallel(cl)
+
+data_training <- otuTrain
+data_test <- otuTest
+
+########## 1.1 
+
+####### ROC 
+ctrl <- trainControl(
+                     method = "repeatedcv",
+                     number = 10,
+                     repeats = 5,
+                     summaryFunction = twoClassSummary,
+                     classProbs = TRUE)
+# Build a standard classifier using a Random Forest
+set.seed(3456)
+model_rf = train(nodule ~ .,
+                 data = data_training,
+                 method = "rf",
+                 metric = "ROC",
+                 #preProcess = c("zv","center", "scale"),
+                 trControl = ctrl)
+model_rf 
+
+## predict
+confusionMatrix(predict(model_rf, data_test), data_test$nodule) 
+
+
+########## 1.2 Under-sampling
+
+####### ROC 
+ctrl <- trainControl(method = "repeatedcv",
+                     number = 10,
+                     repeats = 5,
+                     verboseIter = FALSE,
+                     summaryFunction = twoClassSummary,
+                     classProbs = TRUE,
+                     sampling = "down")
+
+set.seed(3456)
+model_rf_under = train(nodule ~ .,
+                       data = data_training,
+                       method = "rf",
+                       metric = "ROC",
+                       #preProcess = c("zv","center", "scale"),
+                       trControl = ctrl)
+model_rf_under 
+
+## predict
+confusionMatrix(predict(model_rf_under,data_test), data_test$nodule) 
+
+
+########## 1.3 Oversampling
+
+####### ROC 
+ctrl <- trainControl(method = "repeatedcv",
+                     number = 10,
+                     repeats = 5,
+                     verboseIter = FALSE,
+                     summaryFunction = twoClassSummary,
+                     classProbs = TRUE,
+                     sampling = "up")
+
+set.seed(3456)
+model_rf_over = train(nodule ~ .,
+                      data = otuTrain,
+                      method = "rf",
+                      metric = "ROC",
+                      #preProcess = c("zv","center", "scale"),
+                      trControl = ctrl)
+model_rf_over 
+
+
+## predict
+confusionMatrix(predict(model_rf_over, data_test), data_test$nodule) 
+
+# ########## 1.4 ROSE
+# ctrl <- trainControl(method = "repeatedcv",
+#                      number = 10,
+#                      repeats = 5,
+#                      verboseIter = FALSE,
+#                      summaryFunction = twoClassSummary,
+#                      classProbs = TRUE,
+#                      sampling = "rose")
+# 
+# set.seed(3456)
+# model_rf_rose <- train(nodule ~ .,
+#                        data = data_training,
+#                        method = "rf",
+#                        #metric = "ROC",
+#                        #preProcess = c("zv","center", "scale"),
+#                        trControl = ctrl)
+# model_rf_rose 
+# 
+
+# ## predict
+# confusion_matrix <- confusionMatrix(predict(model_rf_rose, data_test), data_test$nodule) 
+# confusion_matrix
+# 
+
+########## 1.5 SMOTE
+
+####### ROC 
+ctrl <- trainControl(method = "repeatedcv",
+                     number = 10,
+                     repeats = 5,
+                     verboseIter = FALSE,
+                     summaryFunction = twoClassSummary,
+                     classProbs = TRUE,
+                     sampling = "smote")
+
+set.seed(3456)
+model_rf_smote <- train(nodule ~ .,
+                        data = data_training,
+                        method = "rf",
+                        metric = "ROC",
+                        #preProcess = c("zv","center", "scale"),
+                        trControl = ctrl)
+model_rf_smote 
+
+## predict
+confusionMatrix(predict(model_rf_smote, data_test), data_test$nodule) 
+
+```
+
+## ROC loocv
+```{r}
+
+fitControl <- trainControl(
+  method = 'LOOCV',                
+  savePredictions = 'final',        
+  classProbs = T ,
+  #seed = as.list(rep(1,nrow(otu_group)+1)),                
+  summaryFunction=twoClassSummary ,
+) 
+
+set.seed(3456)
+model_rf_original_loocv <- train( nodule ~ .,
+                                  data = data_training,
+                                  method='rf', 
+                                  #preProcess = c("zv","center", "scale"), 
+                                  trControl = fitControl)
+model_rf_original_loocv 
+
+## predict loocv
+confusionMatrix(predict(model_rf_original_loocv, data_test), data_test$nodule) 
+
+fitControl <- trainControl(
+  method = 'LOOCV',                
+  savePredictions = 'final',        
+  classProbs = T ,
+  #seed = as.list(rep(1,nrow(otu_group)+1)),                
+  summaryFunction=twoClassSummary ,
+  sampling = "down"
+) 
+
+set.seed(3456)
+model_rf_down_loocv <- train(nodule ~ .,
+                             data = data_training,
+                              method='rf', 
+                              metric = "ROC",
+                              #preProcess = c("zv","center", "scale"), 
+                              trControl = fitControl)
+model_rf_down_loocv 
+
+## predict loocv
+confusionMatrix(predict(model_rf_down_loocv, data_test), data_test$nodule) 
+
+fitControl <- trainControl(
+  method = 'LOOCV',                
+  savePredictions = 'final',        
+  classProbs = T ,
+  #seed = as.list(rep(1,nrow(otu_group)+1)),                
+  summaryFunction=twoClassSummary ,
+  sampling = "up"
+) 
+
+set.seed(3456)
+model_rf_up_loocv <- train( nodule~ ., 
+                            data=data_training,
+                            method='rf', 
+                            metric = "ROC",
+                            #preProcess = c("zv","center", "scale"), 
+                            trControl = fitControl)
+model_rf_up_loocv 
+
+## predict loocv
+confusionMatrix(predict(model_rf_up_loocv, data_test),data_test$nodule) 
+
+# fitControl <- trainControl(
+#   method = 'LOOCV',                
+#   savePredictions = 'final',        
+#   classProbs = T ,
+#   #seed = as.list(rep(1,nrow(otu_group)+1)),                
+#   summaryFunction=twoClassSummary ,
+#   sampling = "rose"
+# ) 
+# 
+# set.seed(3456)
+# model_rf_rose_loocv <- train( nodule~ ., 
+#                               data=data_training,
+#                               method='rf', 
+#                               #preProcess = c("zv","center", "scale"), 
+#                               trControl = fitControl)
+# model_rf_rose_loocv 
+
+# ## predict loocv
+# confusion_matrix <- confusionMatrix(predict(model_rf_rose_loocv, data_test), data_test$nodule) 
+# confusion_matrix
+
+fitControl <- trainControl(
+  method = 'LOOCV',                
+  savePredictions = 'final',        
+  classProbs = T ,
+  #seed = as.list(rep(1,nrow(otu_group)+1)),                
+  summaryFunction=twoClassSummary,
+  sampling = "smote"
+) 
+
+set.seed(3456)
+model_rf_smote_loocv <- train( nodule~ ., 
+                               data=data_training,
+                               method='rf', 
+                               metric = "ROC",
+                               #preProcess = c("zv","center", "scale"), 
+                               trControl = fitControl)
+model_rf_smote_loocv 
+
+## predict loocv
+confusionMatrix(predict(model_rf_smote_loocv, data_test), data_test$nodule, positive = "MO") 
+
+```
+
+## AUROC 
+```{r}
+models_cv <- list(original = model_rf,
+               down = model_rf_under,
+               up = model_rf_over,
+               SMOTE = model_rf_smote
+               # ROSE = model_rf_rose
+               )
+models_cv
+inside_resampling <- resamples(models_cv)
+
+## ROC
+summary(inside_resampling, metric = "ROC")
+
+models_loocv <- list(original = model_rf_original_loocv,
+               down = model_rf_down_loocv,
+               up = model_rf_up_loocv,
+               SMOTE = model_rf_smote_loocv
+               # ROSE = model_rf_rose_loocv
+               )
+models_loocv
+
+save(models_cv,models_loocv,file = "../03.Output/07.caret/ROC_model.Rdata")
+
+```
+
+# 3.PR
+## PR cv
+```{r}
+####### PR 
+ctrl <- trainControl(
+  method = "repeatedcv",
+  number = 10,
+  repeats = 5,
+  summaryFunction = prSummary,
+  classProbs = TRUE)
+set.seed(3456)
+model_rf = train(nodule ~ .,
+                 data = data_training,
+                 method = "rf",
+                 metric = "AUC",
+                 #preProcess = c("zv","center", "scale"),
+                 trControl = ctrl)
+model_rf 
+confusionMatrix(predict(model_rf, data_test), data_test$nodule, mode = "prec_recall")
+
+ctrl <- trainControl(method = "repeatedcv",
+                     number = 10,
+                     repeats = 5,
+                     verboseIter = FALSE,
+                     summaryFunction = prSummary,
+                     classProbs = TRUE,
+                     sampling = "down")
+
+set.seed(3456)
+model_rf_under = train(nodule ~ .,
+                       data = data_training,
+                       method = "rf",
+                       metric = "AUC",
+                       #preProcess = c("zv","center", "scale"),
+                       trControl = ctrl)
+model_rf_under 
+confusionMatrix(predict(model_rf_under, data_test), data_test$nodule, mode = "prec_recall")
+
+####### PR 
+ctrl <- trainControl(method = "repeatedcv",
+                     number = 10,
+                     repeats = 5,
+                     verboseIter = FALSE,
+                     summaryFunction = prSummary,
+                     classProbs = TRUE,
+                     sampling = "up")
+set.seed(3456)
+model_rf_over = train(nodule ~ .,
+                      data = data_training,
+                      method = "rf",
+                      metric = "AUC",
+                      #preProcess = c("zv","center", "scale"),
+                      trControl = ctrl)
+model_rf_over 
+confusionMatrix(predict(model_rf_over, data_test), data_test$nodule, mode = "prec_recall")
+
+####### PR 
+ctrl <- trainControl(method = "repeatedcv",
+                     number = 10,
+                     repeats = 5,
+                     verboseIter = FALSE,
+                     summaryFunction = prSummary,
+                     classProbs = TRUE,
+                     sampling = "smote")
+set.seed(3456)
+model_rf_smote = train(nodule ~ .,
+                       data = data_training,
+                       method = "rf",
+                       metric = "AUC",
+                       #preProcess = c("zv","center", "scale"),
+                       trControl = ctrl)
+model_rf_smote 
+confusionMatrix(predict(model_rf_smote, data_test), data_test$nodule, mode = "prec_recall")
+
+```
+
+## PR loocv
+```{r}
+
+fitControl <- trainControl(
+  method = 'LOOCV',                
+  savePredictions = 'final',        
+  classProbs = T ,
+  #seed = as.list(rep(1,nrow(otu_group)+1)),                
+  summaryFunction=prSummary ,
+) 
+
+set.seed(3456)
+model_rf_original_loocv <- train( nodule ~ .,
+                                  data = data_training,
+                                  method='rf', 
+                                  #preProcess = c("zv","center", "scale"), 
+                                  trControl = fitControl)
+model_rf_original_loocv 
+confusionMatrix(predict(model_rf_original_loocv, data_test), data_test$nodule, mode = "prec_recall")
+
+fitControl <- trainControl(
+  method = 'LOOCV',                
+  savePredictions = 'final',        
+  classProbs = T ,
+  #seed = as.list(rep(1,nrow(otu_group)+1)),                
+  summaryFunction=prSummary ,
+  sampling = "down"
+) 
+
+set.seed(3456)
+model_rf_down_loocv <- train(nodule ~ .,
+                             data = data_training,
+                             method='rf', 
+                             metric = "AUC",
+                             #preProcess = c("zv","center", "scale"), 
+                             trControl = fitControl)
+model_rf_down_loocv 
+confusionMatrix(predict(model_rf_down_loocv, data_test), data_test$nodule, mode = "prec_recall")
+
+fitControl <- trainControl(
+  method = 'LOOCV',                
+  savePredictions = 'final',        
+  classProbs = T ,
+  #seed = as.list(rep(1,nrow(otu_group)+1)),                
+  summaryFunction=prSummary ,
+  sampling = "up"
+) 
+
+set.seed(3456)
+model_rf_up_loocv <- train( nodule~ ., 
+                            data=data_training,
+                            method='rf', 
+                            metric = "AUC",
+                            #preProcess = c("zv","center", "scale"), 
+                            trControl = fitControl)
+model_rf_up_loocv 
+confusionMatrix(predict(model_rf_up_loocv, data_test), data_test$nodule, mode = "prec_recall")
+
+fitControl <- trainControl(
+  method = 'LOOCV',                
+  savePredictions = 'final',        
+  classProbs = T ,
+  #seed = as.list(rep(1,nrow(otu_group)+1)),                
+  summaryFunction=prSummary,
+  sampling = "smote"
+) 
+
+set.seed(3456)
+model_rf_smote_loocv <- train( nodule~ ., 
+                               data=data_training,
+                               method='rf', 
+                               metric = "AUC",
+                               #preProcess = c("zv","center", "scale"), 
+                               trControl = fitControl)
+model_rf_smote_loocv 
+confusionMatrix(predict(model_rf_smote_loocv, data_test), data_test$nodule, mode = "prec_recall")
+
+stopCluster(cl)
+```
+
+
+## AUPRC
+```{r}
+models_cv <- list(original = model_rf,
+               down = model_rf_under,
+               up = model_rf_over,
+               SMOTE = model_rf_smote
+               # ROSE = model_rf_rose
+               )
+models_cv
+inside_resampling <- resamples(models_cv)
+
+## ROC
+summary(inside_resampling, metric = "AUC")
+
+models_loocv <- list(original = model_rf_original_loocv,
+               down = model_rf_down_loocv,
+               up = model_rf_up_loocv,
+               SMOTE = model_rf_smote_loocv
+               # ROSE = model_rf_rose_loocv
+               )
+models_loocv
+
+save(models_cv,models_loocv,file = "../03.Output/07.caret/PR_model.Rdata")
+
+```
+
+# ROC_model
+```{R}
+load(file = "./09.caret/ROC_model.Rdata")
+```
+
+# 4.pROC plot
+
+```{r}
+########## 2.1 ROC
+
+# Build custom AUC function to extract AUC
+# from the caret model object
+library(pROC)
+test_roc <- function(model, data) {
+  roc(data[,ncol(data)],
+      predict(model, data, type = "prob")[, "IM"],
+      levels=c("MO", "IM"), 
+      direction = "<")
+}
+
+```
+
+##cv
+```{r}
+# repeatcv
+model_list_roc <- models_cv %>%
+  map(test_roc, data = data_test)
+
+model_list_roc %>%
+  map(auc)
+
+# # data_training
+# model_list_roc <- models_cv %>%
+#   map(test_roc, data = data_training)
+# 
+# model_list_roc %>%
+#   map(auc)
+
+```
+
+## loocv
+```{r}
+#LOOCV
+model_list_roc <- models_loocv %>%
+  map(test_roc, data = data_test)
+
+model_list_roc %>%
+  map(auc)
+
+# data_training
+# model_list_roc <- models_loocv %>%
+#   map(test_roc, data = data_training)
+# 
+# model_list_roc %>%
+#   map(auc)
+
+```
+
+# 5.ggplot -all
+```{r}
+# # AUC plot
+
+results_list_roc <- list(NA)
+num_mod <- 1
+for(the_roc in model_list_roc){
+
+  results_list_roc[[num_mod]] <-
+    data_frame(tpr = the_roc$sensitivities,
+               fpr = 1-the_roc$specificities,
+               model = names(models_cv)[num_mod])
+
+  num_mod <- num_mod + 1
+
+}
+results_df_roc <- bind_rows(results_list_roc)
+
+# Plot ROC curve for all 5 models
+ggplot(aes(x = fpr,  y = tpr, group = model), data = results_df_roc) +
+  geom_line(aes(color = model), size = 1) +
+  #scale_color_manual(values = custom_col) +
+  geom_abline(intercept = 0, slope = 1, color = "gray", size = 1) +
+  labs(
+    x = "False Positive Rate (1-Specificity)",
+    y = "True Positive Rate (Sensitivity)")+
+  theme_bw(base_size = 18)
+
+## get parameters
+comparison=tibble()
+models <- models_cv
+for (M in 1:length(models)) {
+  model <- confusionMatrix(predict(models[[M]], data_test), data_test$nodule)
+  name=names(models)[M]
+  xa= tibble(  modelname=name,
+               Sensitivity = model$byClass["Sensitivity"],
+               Specificity = model$byClass["Specificity"],
+               Precision = model$byClass["Precision"],
+               Recall = model$byClass["Recall"],
+               F1 = model$byClass["F1"])
+  print(name)
+  comparison=xa %>% bind_rows(comparison)
+}
+
+## plot all
+comparison %>%
+  gather(x, y, Sensitivity:F1) %>%
+  ggplot(aes(x = x, y = y, color = modelname)) +
+  geom_jitter(width = 0.2, alpha = 0.5, size = 3)
+# ggsave(path=output_dir,"/caret_loocv_prauc_5.png",  width = 5, height = 3)
+
+```
+
+# 6.pROC plot -single
+##  cv
+```{r}
+dir.create("../03.Output/07.caret/repeatcv")
+
+original_roc <- roc(model_list_roc$original$response,model_list_roc$original$predictor,  ci=TRUE,
+                    levels=c("MO", "IM"), 
+                    direction = "<")
+png("../03.Output/07.caret/repeatcv/caret_resample_original_repeatcv_auc.png",width=1500,height = 1500,units = "px",bg="white",res=300)
+plot(original_roc, col = "#FF6F61",lwd = 3,print.auc = TRUE,print.auc.x=0.4,print.auc.y=0.5)   
+dev.off()
+
+p_roc <-  ggroc(model_list_roc$original,colour = "#A0522D",  size = 0.5)+
+  # geom_line( size = 0.5) +
+  ggtitle("ROC Curve") +
+  guides(color = FALSE)+
+  geom_segment(aes(x=1, xend=0, y=0, yend=1), color="grey", linetype="dashed",size = 0.2) +
+  annotate('text', label=paste("AUC =",round(original_roc$auc,3)),color="black",
+           x=0.4, y=0.1,  size = 2,hjust = 0.5)+
+  labs(
+    y = "Sensitivity",
+    x = "Specificity"
+  ) +
+  theme(panel.background=element_rect(fill="white"),
+        panel.border = element_rect(fill=NA,size=0.3),
+        plot.title = element_text(hjust = 0.5,size=7),
+        axis.title =  element_text(size=7),
+        axis.line=element_line(size=0.2), 
+        axis.ticks.length =unit(0.05, "cm"),
+        axis.ticks = element_line(color='black', size=0.2),
+        axis.text.y =   element_text(color="black",size=5),
+        axis.text.x =   element_text(color="black",size=5))  
+p_roc
+ggsave("../03.Output/07.caret/repeatcv/caret_resample_original_repeatcv_roauc.pdf",width = 4,height =4,units = "cm")
+
+```
+
+##loocv
+```{r}
+dir.create("../03.Output/07.caret/loocv")
+
+original_roc <- roc(model_list_roc$original$response,model_list_roc$original$predictor,  
+                    levels=c("MO", "IM"), 
+                    direction = "<")
+png("../03.Output/07.caret/loocv/caret_resample_original_loocv_auc.png",width=1500,height = 1500,units = "px",bg="white",res=300)
+plot(original_roc, col = "#FF6F61",lwd = 3,print.auc = TRUE,print.auc.x=0.4,print.auc.y=0.5)   
+dev.off()
+
+p_roc <-  ggroc(model_list_roc$original,colour = "#A0522D",  size = 0.5)+
+  # geom_line( size = 0.5) +
+  ggtitle("ROC Curve") +
+  guides(color = FALSE)+
+  geom_segment(aes(x=1, xend=0, y=0, yend=1), color="grey", linetype="dashed",size = 0.2) +
+  annotate('text', label=paste("AUC =",round(original_roc$auc,3)),color="black",
+           x=0.4, y=0.1,  size = 2,hjust = 0.5)+
+  labs(
+    y = "Sensitivity",
+    x = "Specificity"
+  ) +
+  # geom_abline(intercept =
+  #               sum(data_test$nodule == "IM")/nrow(data_test),
+  #             slope = 0, color = "gray", size = 1) +
+  theme(panel.background=element_rect(fill="white"),
+        panel.border = element_rect(fill=NA,size=0.3),
+        plot.title = element_text(hjust = 0.5,size=7),
+        axis.title =  element_text(size=7),
+        axis.line=element_line(size=0.2), 
+        axis.ticks.length =unit(0.05, "cm"),
+        axis.ticks = element_line(color='black', size=0.2),
+        axis.text.y =   element_text(color="black",size=5),
+        axis.text.x =   element_text(color="black",size=5))  
+p_roc
+ggsave("../03.Output/07.caret/loocv/caret_resample_original_loocv_roauc.pdf",width = 4,height =4,units = "cm")
+
+```
+
+
+# 7.importance 
+```{r}
+load(file = "../03.Output/07.caret/ROC_model.Rdata")
+load(file = "../03.Output/07.caret/PR_model.Rdata")
+
+roc_imp_cv <- varImp(models_cv$original, scale = FALSE)
+roc_imp_cv
+
+pdf("../03.Output/08.caret/caret_original_ROAUC_varImpPlot.pdf",width = 15/2.54,height =10/2.54)
+plot(roc_imp_cv)
+dev.off()
+
+```
+
+# PR_model
+```{r}
+load(file = "../03.Output/07.caret/PR_model.Rdata")
+
+```
+
+# 8.PRROC plot
+```{r}
+##### AUPRC
+## Issues with using ROC for imbalanced classes
+library(PRROC)
+# calc_auprc <- function(model, data){
+# 
+#   index_IM <- data$nodule == "IM"
+#   index_MO <- data$nodule == "MO"
+# 
+#   predictions <- predict(model, data, type = "prob")
+# 
+#   pr.curve(predictions$IM[index_IM],
+#            predictions$IM[index_MO],
+#            curve = TRUE)
+# 
+# }
+
+calc_auprc <- function(model, data){
+  preds <- predict(model,
+                   data,
+                   type="prob")[,2] #prob of positive class
+  preds_pos <- preds[data$nodule == "IM"] #preds for true positive class
+  preds_neg <- preds[data$nodule == "MO"] #preds for true negative class
+  pr.curve(preds_pos, preds_neg, curve = TRUE)
+  
+}
+```
+
+##cv
+```{r}
+# Get results for all 5 models
+
+model_list_pr <- models_cv %>%
+  map(calc_auprc, data = data_test)
+
+model_list_pr %>%
+  map(function(the_mod) the_mod$auc.integral)
+
+```
+
+##loocv
+```{r}
+model_list_pr <- models_loocv %>%
+  map(calc_auprc, data = data_test)
+
+model_list_pr %>%
+  map(function(the_mod) the_mod$auc.integral)
+
+```
+
+# 9.ggplot -all
+```{r}
+# Plot the AUPRC curve for all 5 models
+
+results_list_pr <- list(NA)
+num_mod <- 1
+
+for(the_pr in model_list_pr){
+
+  results_list_pr[[num_mod]] <- 
+    data_frame(recall = the_pr$curve[, 1],
+               precision = the_pr$curve[, 2],
+               model = names(model_list_pr)[num_mod])
+
+  num_mod <- num_mod + 1
+
+}
+
+results_df_pr <- bind_rows(results_list_pr)
+
+# Plot ROC curve for all 5 models
+custom_col <- c("#000000", "#009E73", "#0072B2", "#D55E00") #, "#CC79A7"
+
+ggplot(aes(x = recall,  y = precision, group = model), data = results_df_pr) +
+  geom_line(aes(color = model), size = 1) +
+  scale_color_manual(values = custom_col) +
+  theme_bw(base_size = 18) + coord_fixed(1)
+
+## get parameters
+comparison=tibble()
+models <- models_loocv
+for (M in 1:length(models)) {
+  model <- confusionMatrix(predict(models[[M]], data_test), data_test$nodule)
+  name=names(models)[M]
+  xa= tibble(  modelname=name,
+               Sensitivity = model$byClass["Sensitivity"],
+               Specificity = model$byClass["Specificity"],
+               Precision = model$byClass["Precision"],
+               Recall = model$byClass["Recall"],
+               F1 = model$byClass["F1"])
+  print(name)
+  comparison=xa %>% bind_rows(comparison)
+}
+
+## plot all
+comparison %>%
+  gather(x, y, Sensitivity:F1) %>%
+  ggplot(aes(x = x, y = y, color = modelname)) +
+  geom_jitter(width = 0.2, alpha = 0.5, size = 3)
+
+```
+
+# 10.PRROC -single
+## cv
+```{r}
+# PR Curve
+p_prauc <- ggplot(aes(x = recall, y = precision, group = model),
+                  data = results_df_pr[results_df_pr$model=="original",]) +
+  geom_line(aes(color = model), size = 0.5) +
+  scale_color_manual(values = c("#A0522D")) +
+  ggtitle("PR Curve") +
+  guides(color = FALSE)+
+    annotate('text', label=paste("AUC =",round(model_list_pr$original$auc.integral,4)),color="black",
+           x=0.7, y=0.55,  size = 2,hjust = 0.5)+
+  theme(panel.background=element_rect(fill="white"),
+        panel.border = element_rect(fill=NA,size=0.3),
+        plot.title = element_text(hjust = 0.5,size=7),
+        axis.title =  element_text(size=7),
+        axis.line=element_line(size=0.2), 
+        axis.ticks.length =unit(0.05, "cm"),
+        axis.ticks = element_line(color='black', size=0.2),
+        axis.text.y =   element_text(color="black",size=5),
+        axis.text.x =   element_text(color="black",size=5))  
+p_prauc
+
+ggsave("../03.Output/07.caret/repeatcv/caret_resample_original_repeatcv_prauc.pdf",width = 4,height =4,units = "cm")
+
+```
+
+# 7.importance 
+```{r}
+load(file = "./09.caret/PR_model.Rdata")
+
+roc_imp <- varImp(models_cv$original, scale = FALSE)
+roc_imp
+
+pdf("./09.caret/caret_original_PRAUC_varImpPlot.pdf",width = 10/2.54,height =5/2.54)
+plot(roc_imp)
+dev.off()
+
+```
+

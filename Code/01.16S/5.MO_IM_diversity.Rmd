@@ -1,0 +1,709 @@
+---
+title: "5.MO_IM_diversity"
+author: "yinghong"
+date: "2024-04-23"
+output: html_document
+---
+
+# 1.
+```{r}
+dir.create("../03.Output/05.MO_IM_diversity")
+
+load(file ="../03.Output/02.tax/ps.rarefied.asv.Rdata")
+
+ps.rarefied.asv 
+
+## IM-MO
+(ps.asv.filt.rna <- subset_samples(ps.rarefied.asv,ID %in% metadata_rna$ID))
+(ps.asv.filt.rna <- prune_taxa(taxa_sums(ps.asv.filt.rna) > 0, ps.asv.filt.rna))
+sample_data(ps.asv.filt.rna) <- sample_data(metadata_rna)
+# save(ps.asv.filt.rna,file="../03.Output/05.MO_IM_diversity/ps.asv.filt.rna.Rdata")
+
+```
+
+# 2.alpha diversity - nodule
+```{r}
+
+ps.HVM.filt <-ps.asv.filt.rna
+
+##
+otu_filt_HVM_diff <- otu_table(ps.HVM.filt) %>% data.frame()  
+design_filt_HVM_diff <- sample_data(ps.HVM.filt)  %>% data.frame() 
+
+```
+
+```{r}
+#alpha——diversity
+alpha_diversity <- function(x) {
+  observed_species <- estimateR(x)[1,]
+  Chao1 <- estimateR(x)[2,]
+  ACE <- estimateR(x)[4,]
+  Shannon <- diversity(x, index='shannon', base=2)
+  Simpson <- diversity(x, index='simpson')
+  goods_Coverage <- 1 - rowSums(x == 1) / rowSums(x)
+  Shannon <- sprintf("%0.4f", Shannon)
+  Simpson <- sprintf("%0.4f", Simpson)
+  goods_Coverage <- sprintf("%0.4f", goods_Coverage)
+  result <- data.frame(observed_species, Chao1, ACE, Shannon, Simpson, goods_Coverage)
+}
+#
+alpha_nodule=alpha_diversity(t(otu_filt_HVM_diff))
+alpha_nodule[,c("Shannon","Simpson")] <- lapply(alpha_nodule[,c("Shannon","Simpson")],as.numeric)
+
+rownames(alpha_nodule) <- colnames(otu_filt_HVM_diff)
+
+alpha_nodule_merge <- merge(design_filt_HVM_diff,alpha_nodule,by.x="row.names",by.y="row.names") %>%
+  tibble::column_to_rownames(var="Row.names")
+
+```
+
+## shannon
+```{r}
+kruskal.test(Shannon~nodule1, alpha_nodule_merge) 
+dunnTest(Shannon~nodule1, alpha_nodule_merge)
+
+Shannon_nodule <-ggplot(alpha_nodule_merge,aes(x=nodule1,y=Shannon,fill=nodule1)) +
+  geom_boxplot(width=0.5,outlier.size = 0.5,linewidth=0.2)+
+  geom_signif(comparisons = list(c("MO","IM")),  
+              # map_signif_level = TRUE,
+              size = 0.2,
+              textsize = 3,
+              test = "wilcox.test",
+              y_position = c(7.8))+ 
+  scale_y_continuous(limits = c(0,8.5))+
+  scale_fill_manual(values = c("#4393c3","#92c5de","#f4a582","#d6604d"))+ 
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())+
+  labs(y="Shannon",x=NULL)+
+  guides(fill="none")+
+  theme(panel.background=element_rect(fill="white"),
+        panel.border = element_rect(fill=NA,size=0.2),
+        axis.title.x=element_blank(), 
+        axis.title.y=element_text(size=14),  
+        axis.line=element_line(size=0.2),      
+        axis.text.x=element_text(color='black', size=12), 
+        axis.text.y=element_text(color='black', size=12), 
+        axis.ticks =element_line(color='black', size=0.2),
+        axis.ticks.length=unit(0.05, "cm"),
+        legend.key=element_blank(),
+        legend.key.height = unit(5, "pt"),
+        legend.key.width  = unit(5, "pt"),
+        legend.title=element_text(color='black', size=14),
+        legend.text=element_text(color='black', size=12),
+  );Shannon_nodule
+
+# ggsave(path="../03.Output/05.MO_IM_diversity","Shannon_nodule.pdf",Shannon_nodule,width = 3.3, height = 2)
+
+```
+
+
+## chao1
+```{r}
+kruskal.test(Chao1~nodule1, alpha_nodule_merge)
+dunnTest(Chao1~nodule1, alpha_nodule_merge)
+
+Chao1_nodule<-ggplot(alpha_nodule_merge,aes(x=nodule1,Chao1,fill=nodule1)) +
+  geom_boxplot(width=0.5,outlier.size = 0.1,linewidth=0.2)+
+  geom_signif(comparisons = list(c("MO","IM")),
+              # map_signif_level = TRUE,
+              size = 0.2,
+              textsize = 3,
+              test = "wilcox.test",
+              y_position = c(280))+ 
+  scale_y_continuous(limits = c(0,320))+
+  guides(fill="none")+
+  scale_fill_manual(values = c("#4393c3","#92c5de","#f4a582","#d6604d"))+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())+
+  labs(y="Chao1",x=NULL)+
+  theme(panel.background=element_rect(fill="white"),
+        panel.border = element_rect(fill=NA,size=0.2),
+        axis.title.x=element_blank(), 
+        axis.title.y=element_text(size=14),  
+        axis.line=element_line(size=0.2),      
+        axis.text.x=element_text(color='black', size=12), 
+        axis.text.y=element_text(color='black', size=12), 
+        axis.ticks =element_line(color='black', size=0.2),
+        axis.ticks.length=unit(0.05, "cm"),
+        legend.key=element_blank(),
+        legend.key.height = unit(5, "pt"),
+        legend.key.width  = unit(5, "pt"),
+        legend.title=element_text(color='black', size=14),
+        legend.text=element_text(color='black', size=12),
+        # title = element_text(color='black', size=13)
+  )
+Chao1_nodule
+# ggsave(path="../03.Output/05.MO_IM_diversity","Chao1_nodule.pdf",Chao1_nodule,width = 3.5, height = 2)
+
+```
+
+# 2.alpha diversity - MO group 
+```{r}
+load(file="../03.Output/02.tax/asv_rarefied/ps.asv.nodule.rna.adj.diff.MO.Rdata")
+
+ps.HVM.filt <-ps.asv.nodule.rna.adj.diff.MO
+otu_filt_HVM_diff <- otu_table(ps.HVM.filt) %>% data.frame()  
+design_filt_HVM_diff <- sample_data(ps.HVM.filt)  %>% data.frame() 
+
+#alpha——diversity
+
+alpha_diversity <- function(x) {
+  observed_species <- estimateR(x)[1,]
+  Chao1 <- estimateR(x)[2,]
+  ACE <- estimateR(x)[4,]
+  Shannon <- diversity(x, index='shannon', base=2)
+  Simpson <- diversity(x, index='simpson')
+  goods_Coverage <- 1 - rowSums(x == 1) / rowSums(x)
+  Shannon <- sprintf("%0.4f", Shannon)
+  Simpson <- sprintf("%0.4f", Simpson)
+  goods_Coverage <- sprintf("%0.4f", goods_Coverage)
+  result <- data.frame(observed_species, Chao1, ACE, Shannon, Simpson, goods_Coverage)
+}
+
+#
+alpha_nodule=alpha_diversity(t(otu_filt_HVM_diff))
+alpha_nodule[,c("Shannon","Simpson")] <- lapply(alpha_nodule[,c("Shannon","Simpson")],as.numeric)
+alpha_nodule_merge <- merge(design_filt_HVM_diff,alpha_nodule,by.x="row.names",by.y="row.names") %>%
+  tibble::column_to_rownames(var="Row.names")
+
+```
+
+## shannon
+```{r}
+wilcox.test(Shannon~Group, alpha_nodule_merge)
+Shannon_nodule_group <-ggplot(alpha_nodule_merge,aes(x=Group,y=Shannon,fill=Group)) +
+  geom_boxplot(width=0.3,outlier.size = 0.5,linewidth=0.2)+
+  theme_bw()+
+  scale_y_continuous(limits = c(0,8))+
+  scale_fill_manual(values = c("#1B9E77", "#D95F02"))+
+  scale_x_discrete(labels = c("Adjacent"="MO_Adjacent", "Tumor"="MO_Tumor"))+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())+
+  labs(y="Shannon",x=NULL)+
+  guides(fill="none")+
+  theme(panel.background=element_rect(fill="white"),
+        panel.border = element_rect(fill=NA,size=0.2),
+        axis.title.y=element_text(size=14), 
+        axis.line=element_line(size=0.2),      
+        axis.text.x=element_text(color='black', size=12), 
+        axis.text.y=element_text(color='black', size=12), 
+        axis.ticks =element_line(color='black', size=0.2),
+        axis.ticks.length=unit(0.05, "cm"),
+        legend.title=element_text(color='black', size=14),
+        legend.text=element_text(color='black', size=12),
+  );Shannon_nodule_group
+
+ggsave(path="../03.Output/05.MO_IM_diversity","Shannon_nodule_group_MO.pdf",Shannon_nodule_group,width = 2.7, height = 2.5)
+
+```
+
+## chao1
+```{r}
+wilcox.test(Chao1~Group, alpha_nodule_merge)
+Chao1_nodule_group <-ggplot(alpha_nodule_merge,aes(x=Group,y=Chao1,fill=Group)) +
+  geom_boxplot(width=0.3,outlier.size = 0.5,linewidth=0.2)+
+  theme_bw()+
+  scale_y_continuous(limits = c(0,200))+
+  guides(fill="none")+
+  scale_fill_manual(values = c("#1B9E77", "#D95F02"))+
+  scale_x_discrete(labels = c("Adjacent"="MO_Adjacent", "Tumor"="MO_Tumor"))+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())+
+  labs(y="Chao1",x=NULL)+
+  theme(panel.background=element_rect(fill="white"),
+        panel.border = element_rect(fill=NA,size=0.2),
+        axis.title.y=element_text(size=14), 
+        axis.line=element_line(size=0.2),      
+        axis.text.x=element_text(color='black', size=12), 
+        axis.text.y=element_text(color='black', size=12), 
+        axis.ticks =element_line(color='black', size=0.2),
+        axis.ticks.length=unit(0.05, "cm"),
+        legend.title=element_text(color='black', size=14),
+        legend.text=element_text(color='black', size=12),
+  );Chao1_nodule_group
+ggsave(path="../03.Output/05.MO_IM_diversity","Chao1_nodule_group_MO.pdf",Chao1_nodule_group,width = 2.9, height = 2.5)
+
+```
+
+# 2.alpha diversity - IM group 
+```{r}
+load(file="../03.Output/02.tax/asv_rarefied/ps.asv.nodule.rna.adj.diff.IM.Rdata")
+
+ps.HVM.filt <-ps.asv.nodule.rna.adj.diff.IM
+otu_filt_HVM_diff <- otu_table(ps.HVM.filt) %>% data.frame()  
+design_filt_HVM_diff <- sample_data(ps.HVM.filt)  %>% data.frame() 
+
+#alpha——diversity
+alpha_diversity <- function(x) {
+  observed_species <- estimateR(x)[1,]
+  Chao1 <- estimateR(x)[2,]
+  ACE <- estimateR(x)[4,]
+  Shannon <- diversity(x, index='shannon', base=2)
+  Simpson <- diversity(x, index='simpson')
+  goods_Coverage <- 1 - rowSums(x == 1) / rowSums(x)
+  Shannon <- sprintf("%0.4f", Shannon)
+  Simpson <- sprintf("%0.4f", Simpson)
+  goods_Coverage <- sprintf("%0.4f", goods_Coverage)
+  result <- data.frame(observed_species, Chao1, ACE, Shannon, Simpson, goods_Coverage)
+}
+
+#
+alpha_nodule=alpha_diversity(t(otu_filt_HVM_diff))
+alpha_nodule[,c("Shannon","Simpson")] <- lapply(alpha_nodule[,c("Shannon","Simpson")],as.numeric)
+alpha_nodule_merge <- merge(design_filt_HVM_diff,alpha_nodule,by.x="row.names",by.y="row.names") %>%
+  tibble::column_to_rownames(var="Row.names")
+
+
+```
+
+
+## shannon
+```{r}
+wilcox.test(Shannon~Group, alpha_nodule_merge)
+Shannon_nodule_group <-ggplot(alpha_nodule_merge,aes(x=Group,y=Shannon,fill=Group)) +
+  geom_boxplot(width=0.3,outlier.size = 0.5,linewidth=0.2)+
+  theme_bw()+
+  scale_y_continuous(limits = c(0,8))+
+  scale_fill_manual(values = c("#1B9E77", "#D95F02"))+
+  scale_x_discrete(labels = c("Adjacent"="IM_Adjacent", "Tumor"="IM_Tumor"))+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())+
+  labs(y="Shannon",x=NULL)+
+  guides(fill="none")+
+  theme(panel.background=element_rect(fill="white"),
+        panel.border = element_rect(fill=NA,size=0.2),
+        axis.title.y=element_text(size=14), 
+        axis.line=element_line(size=0.2),      
+        axis.text.x=element_text(color='black', size=12), 
+        axis.text.y=element_text(color='black', size=12), 
+        axis.ticks =element_line(color='black', size=0.2),
+        axis.ticks.length=unit(0.05, "cm"),
+        legend.title=element_text(color='black', size=14),
+        legend.text=element_text(color='black', size=12),
+  );Shannon_nodule_group
+ggsave(path="../03.Output/05.MO_IM_diversity","Shannon_nodule_group_IM.pdf",Shannon_nodule_group,width = 2.7, height = 2.5)
+
+```
+
+## chao1
+```{r}
+wilcox.test(Chao1~Group, alpha_nodule_merge)
+Chao1_nodule_group <-ggplot(alpha_nodule_merge,aes(x=Group,y=Chao1,fill=Group)) +
+  geom_boxplot(width=0.3,outlier.size = 0.5,linewidth=0.2)+
+  theme_bw()+
+  scale_y_continuous(limits = c(0,200))+
+  guides(fill="none")+
+  scale_fill_manual(values = c("#1B9E77", "#D95F02"))+
+  scale_x_discrete(labels = c("Adjacent"="IM_Adjacent", "Tumor"="IM_Tumor"))+
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank())+
+  labs(y="Chao1",x=NULL)+
+  theme(panel.background=element_rect(fill="white"),
+        panel.border = element_rect(fill=NA,size=0.2),
+        axis.title.y=element_text(size=14), 
+        axis.line=element_line(size=0.2),      
+        axis.text.x=element_text(color='black', size=12), 
+        axis.text.y=element_text(color='black', size=12), 
+        axis.ticks =element_line(color='black', size=0.2),
+        axis.ticks.length=unit(0.05, "cm"),
+        legend.title=element_text(color='black', size=14),
+        legend.text=element_text(color='black', size=12)
+  );Chao1_nodule_group
+
+ggsave(path="../03.Output/05.MO_IM_diversity","Chao1_nodule_group_IM.pdf",Chao1_nodule_group,width = 2.9, height = 2.5)
+
+```
+
+# 3.beta diversity - nodule
+```{r}
+ps.HVM.filt <-ps.asv.filt.rna
+  
+otu_filt_HVM_diff <- otu_table(ps.HVM.filt) %>% data.frame()  
+design_filt_HVM_diff <- sample_data(ps.HVM.filt)  %>% data.frame() 
+
+otu.distance<- vegdist(t(otu_filt_HVM_diff),method="bray") 
+beta_bray <- as.matrix(otu.distance)
+
+idx_bray = rownames(design_filt_HVM_diff) %in% rownames(beta_bray)
+sub_design_bray=design_filt_HVM_diff[idx_bray,]
+beta_bray=beta_bray[rownames(sub_design_bray),rownames(sub_design_bray)]
+
+sub_dis_table <- as.dist(beta_bray, diag = FALSE, upper = FALSE)
+
+set.seed(123)
+adonis_table = adonis2(beta_bray~nodule1+Batch, data=sub_design_bray, permutations = 10000,strate=Patient) 
+adonis_table 
+adonis_pvalue = adonis_table$`Pr(>F)`[1]
+adonis_pvalue   
+
+R2 <- round(adonis_table$R2[1], 3)
+pvalue <- round(adonis_table$`Pr(>F)`[1], 2)
+
+pcoa = cmdscale(beta_bray, k=4, eig=T)
+# get coordinate string, format to dataframme
+points <- as.data.frame(pcoa$points) 
+eig = pcoa$eig
+points = cbind(points, sub_design_bray$nodule,sub_design_bray$nodule1)
+# rename group name
+colnames(points) = c("PC1", "PC2", "PC3", "PC4","nodule","nodule1") 
+
+p_bray_nodule = ggplot(points, aes(x=PC1, y=PC2, color=nodule1)) + 
+  geom_point(aes(color = nodule1),size=1)+
+  labs(x=paste("PCoA 1 (", format(100 * eig[1] / sum(eig), digits=4), "%)", sep=""),
+       y=paste("PCoA 2 (", format(100 * eig[2] / sum(eig), digits=4), "%)", sep="")) + 
+  annotate('text', label = paste0("PERMANOVA R2 = ",R2 ,"\n","p = ", pvalue, sep = ""),
+           x=0.1, y=-0.4, size = 3,hjust = 0) +
+  scale_color_manual(values =  c("#4393c3","#92c5de","#f4a582","#d6604d"))+ 
+  guides(color=guide_legend(title="Nodule type"),nrow=2,ncol=2) +
+  theme(panel.background=element_rect(fill="white"),
+        panel.border = element_rect(fill=NA,size=0.2),
+        axis.title.x=element_text(size=14), 
+        axis.title.y=element_text(size=14), 
+        axis.line=element_line(size=0.2),      
+        axis.text.x=element_text(color='black', size=12), 
+        axis.text.y=element_text(color='black', size=12), 
+        axis.ticks =element_line(color='black', size=0.2),
+        axis.ticks.length=unit(0.05, "cm"),
+        legend.title=element_text(color='black', size=14),
+        legend.text=element_text(color='black', size=12),
+        legend.position = "top",
+        legend.key=element_blank(),
+        legend.key.height = unit(5, "pt"),
+        legend.key.width  = unit(5, "pt")
+        )+ 
+  stat_ellipse(level=0.8) #warning
+p_bray_nodule
+# ggsave('../03.Output/05.MO_IM_diversity/beta_PCoA_mo_im.pdf',p_bray_nodule,width = 3.6, height =3.5)
+
+set.seed(100)
+group_name = unique(sub_design_bray$nodule1)
+result.CP = data.frame()
+for (i in 1:(length(group_name) - 1)) {
+  for (j in (i + 1):length(group_name)) {
+    group_ij = subset(sub_design_bray, nodule1%in% c(as.character(group_name[i]), as.character(group_name[j])))
+    otu_ij = beta_bray[rownames(group_ij), ]
+    adonis_result_otu_ij = adonis2(otu_ij~nodule1, group_ij, permutations = 999, distance = 'bray')
+    res.temp = as.data.frame(adonis_result_otu_ij$`Pr(>F)`[1])
+    rownames(res.temp) = paste(as.character(group_name[i]),'/',as.character(group_name[j]))
+    result.CP = rbind(result.CP,res.temp)
+  }
+}
+head(result.CP,nrow(result.CP))
+colnames(result.CP) <- "adonis_result_pvalue"
+result.CP$p.adjust <- p.adjust(result.CP[,1], method = "BH")
+head(result.CP,nrow(result.CP))
+write.csv(result.CP,"../03.Output/05.MO_IM_diversity/beta_result.CP.csv")
+
+```
+
+
+# 3.beta diversity - MO group 
+```{r}
+ps.HVM.filt <-ps.asv.nodule.rna.adj.diff.MO
+otu_filt_HVM_diff <- otu_table(ps.HVM.filt) %>% data.frame()   
+design_filt_HVM_diff <- sample_data(ps.HVM.filt)  %>% data.frame() 
+
+otu.distance<- vegdist(t(otu_filt_HVM_diff),method="bray") 
+beta_bray <- as.matrix(otu.distance)
+
+idx_bray = rownames(design_filt_HVM_diff) %in% rownames(beta_bray)
+sub_design_bray=design_filt_HVM_diff[idx_bray,]
+beta_bray=beta_bray[rownames(sub_design_bray),rownames(sub_design_bray)]
+
+adonis_table = adonis2(beta_bray~Group+Batch, data=sub_design_bray, permutations = 10000,strate=Patient) 
+adonis_table 
+
+adonis_pvalue = adonis_table$`Pr(>F)`[1]
+adonis_pvalue   
+
+R2 <- round(adonis_table$R2[1], 3)
+pvalue <- round(adonis_table$`Pr(>F)`[1], 2)
+
+#group
+pcoa = cmdscale(beta_bray, k=4, eig=T)
+# get coordinate string, format to dataframme
+points <- as.data.frame(pcoa$points) 
+eig = pcoa$eig
+points = cbind(points, sub_design_bray$Group)
+# rename group name
+colnames(points) = c("PC1", "PC2", "PC3", "PC4","Group") 
+
+p_bray_group = ggplot(points, aes(x=PC1, y=PC2, color=Group)) + geom_point(alpha=1, size=1) +
+  labs(x=paste("PCoA 1 (", format(100 * eig[1] / sum(eig), digits=4), "%)", sep=""),
+       y=paste("PCoA 2 (", format(100 * eig[2] / sum(eig), digits=4), "%)", sep="")) + 
+  annotate('text', label=paste("PERMANOVA","\n", "R2 = ",R2,"\n", "p = ", pvalue, sep = ""),color="black",
+           x=-0.60, y=0.35,  size = 3,hjust = 0) + #,hjust = 0.5
+  ggtitle(label="MO nodules") +
+  scale_color_manual(values =  c("#1B9E77", "#D95F02"))+
+  guides(color=guide_legend(title="Group"),) +
+  theme(panel.background=element_rect(fill="white"),
+        panel.border = element_rect(fill=NA,size=0.2),
+        plot.title = element_text(hjust = 0.5,size=14),
+        axis.title.x=element_text(size=14), 
+        axis.title.y=element_text(size=14), 
+        axis.line=element_line(size=0.2),      
+        axis.text.x=element_text(color='black', size=12), 
+        axis.text.y=element_text(color='black', size=12), 
+        axis.ticks =element_line(color='black', size=0.2),
+        axis.ticks.length=unit(0.05, "cm"),
+        legend.key=element_blank(),
+        legend.key.height = unit(5, "pt"),
+        legend.key.width  = unit(5, "pt"),
+        legend.title=element_text(color='black', size=14),
+        legend.text=element_text(color='black', size=12),
+        title = element_text(color='black', size=14))+ 
+  stat_ellipse(level=0.8) #warning
+p_bray_group
+
+ggsave('../03.Output/05.MO_IM_diversity/beta_PCoA_group_MO.pdf',p_bray_group,width = 4,height=3)
+
+```
+
+# 3.beta diversity - IM group 
+```{r}
+
+ps.HVM.filt <-ps.asv.nodule.rna.adj.diff.IM
+otu_filt_HVM_diff <- otu_table(ps.HVM.filt) %>% data.frame()    
+design_filt_HVM_diff <- sample_data(ps.HVM.filt)  %>% data.frame() 
+
+otu.distance<- vegdist(t(otu_filt_HVM_diff),method="bray") 
+beta_bray <- as.matrix(otu.distance)
+
+idx_bray = rownames(design_filt_HVM_diff) %in% rownames(beta_bray)
+sub_design_bray=design_filt_HVM_diff[idx_bray,]
+beta_bray=beta_bray[rownames(sub_design_bray),rownames(sub_design_bray)]
+
+adonis_table = adonis2(beta_bray~Group, data=sub_design_bray, permutations = 10000,strate=Patient)
+adonis_table 
+
+adonis_pvalue = adonis_table$`Pr(>F)`[1]
+adonis_pvalue  
+
+R2 <- round(adonis_table$R2[1], 3)
+pvalue <- round(adonis_table$`Pr(>F)`[1], 2)
+
+#group
+pcoa = cmdscale(beta_bray, k=4, eig=T)
+# get coordinate string, format to dataframme
+points <- as.data.frame(pcoa$points) 
+eig = pcoa$eig
+points = cbind(points, sub_design_bray$Group)
+# rename group name
+colnames(points) = c("PC1", "PC2", "PC3", "PC4","Group") 
+
+p_bray_group = ggplot(points, aes(x=PC1, y=PC2, color=Group)) + geom_point(alpha=1, size=1) +
+  labs(x=paste("PCoA 1 (", format(100 * eig[1] / sum(eig), digits=4), "%)", sep=""),
+       y=paste("PCoA 2 (", format(100 * eig[2] / sum(eig), digits=4), "%)", sep="")) + 
+  annotate('text', label=paste("PERMANOVA","\n", "R2 = ",R2,"\n", "p = ", pvalue, sep = ""),color="black",
+           x=0.1, y=0.45,  size = 3,hjust =0) +
+  ggtitle(label="IM nodules") +
+  scale_color_manual(values =  c("#1B9E77", "#D95F02"))+
+  guides(color=guide_legend(title="Group"),) +
+  theme(panel.background=element_rect(fill="white"),
+        panel.border = element_rect(fill=NA,size=0.2),
+        plot.title = element_text(hjust = 0.5,size=14),
+        axis.title.x=element_text(size=14), 
+        axis.title.y=element_text(size=14), 
+        axis.line=element_line(size=0.2),      
+        axis.text.x=element_text(color='black', size=12), 
+        axis.text.y=element_text(color='black', size=12), 
+        axis.ticks =element_line(color='black', size=0.2),
+        axis.ticks.length=unit(0.05, "cm"),
+        legend.key=element_blank(),
+        legend.key.height = unit(5, "pt"),
+        legend.key.width  = unit(5, "pt"),
+        legend.title=element_text(color='black', size=14),
+        legend.text=element_text(color='black', size=12),
+        title = element_text(color='black', size=14))+ 
+  stat_ellipse(level=0.8) #warning
+p_bray_group
+
+ggsave('../03.Output/05.MO_IM_diversity/beta_PCoA_group_IM.pdf',p_bray_group,width = 4,height=3)
+
+```
+
+
+# 4.phylum 
+```{r}
+(ps.rarefied.Phylum <- aggregate_taxa(ps.rarefied.asv, "Phylum"))  
+(ps.rarefied.Phylum.filt.rna <- subset_samples(ps.rarefied.Phylum,ID %in% metadata_rna$ID))
+(ps.rarefied.Phylum.filt.rna <- prune_taxa(taxa_sums(ps.rarefied.Phylum.filt.rna) > 0, ps.rarefied.Phylum.filt.rna))
+sample_data(ps.rarefied.Phylum.filt.rna) <- sample_data(metadata_rna)
+
+ps <- microbiome::transform(ps.rarefied.Phylum.filt.rna,"compositional")
+
+metadata <- sample_data(ps) %>% data.frame()
+otutable <- otu_table(ps) %>% data.frame()
+taxtable <- tax_table(ps) %>% data.frame()
+
+#phylum 
+otutable$taxa <- rownames(otutable)
+
+otutable <- aggregate(otutable[,1:189],by=list(otutable$taxa),FUN=sum) 
+otutable <- otutable %>%
+  tibble::column_to_rownames(var="Group.1")
+
+mean_sort_filt = otutable[(order(-rowSums(otutable))), ] # decrease sort
+colSums(mean_sort_filt)
+
+#phylum
+mean_sort_filt=as.data.frame(mean_sort_filt)
+other_filt = colSums(mean_sort_filt[c(6:dim(mean_sort_filt)[1]), ])
+mean_sort_filt = mean_sort_filt[c(1:5), ]
+mean_sort_filt= rbind(mean_sort_filt,other_filt)
+rownames(mean_sort_filt)[6] = c("Others")
+colSums(mean_sort_filt)
+rowMeans(mean_sort_filt)
+
+idx = rownames(metadata) %in% colnames(mean_sort_filt) 
+metadata= metadata[idx,]
+mean_sort_filt = mean_sort_filt[, rownames(metadata)] # reorder according to design
+
+mean_sort_filt_t <- t(mean_sort_filt) %>% as.data.frame()
+mean_sort_filt_t <- mean_sort_filt_t[order(mean_sort_filt_t[,1],mean_sort_filt_t[,2],
+                                           mean_sort_filt_t[,3],mean_sort_filt_t[,4],
+                                           mean_sort_filt_t[,5],mean_sort_filt_t[,6]
+                                           ),]
+
+data_all_filt <- t(mean_sort_filt_t) %>% as.data.frame() %>% 
+  tibble::rownames_to_column(var="Phylum") %>%
+  reshape2::melt(id.vars="Phylum") %>% 
+  merge(.,metadata[,c("ID","nodule1")],by.x="variable",by.y="ID",sort=FALSE)
+
+
+data_all_filt$Phylum<-factor(data_all_filt$Phylum,
+                            levels = rownames(mean_sort_filt)) 
+
+# phylum
+col <-c(  "#BC80BD", "#FFFFB3", "#BEBADA","#B3DE69","#FCCDE5",
+          "#8DD3C7")
+
+p_filt <- ggplot(data_all_filt, aes(x=rev(variable), y = value, fill=Phylum)) +
+  geom_bar(stat="identity", position = 'fill')+
+  facet_grid(~nodule1,scales = "free", space = "free")+
+  xlab("") +
+  ylab("Relative abundance (%)") +
+  scale_fill_manual(values = col)+
+  scale_y_continuous(expand = c(0,0)) +
+  guides(fill=guide_legend(title="Phylum",nrow=2)) +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.background=element_blank(),
+        panel.border =  element_rect(fill=NA,size=0.1), 
+        panel.spacing.x = unit(0.05,"cm"),
+        axis.text.x= element_blank(), 
+        axis.text.y=element_text(color='black', size=12), 
+        axis.ticks.x= element_blank(),
+        axis.title.x = element_blank(), 
+        axis.title.y = element_text(color='black', size=14), 
+        axis.ticks.length.y =unit(0.05, "cm"),
+        axis.ticks.y = element_line(color='black', size=0.1),
+        strip.text = element_text(size=12), #16
+        strip.background = element_rect(fill=NA,size=0.5),
+        legend.position = "bottom",
+        legend.title=element_text(color='black', size=14),
+        legend.text = element_text(face="italic",size=12),
+        legend.key=element_blank(),
+        legend.key.height = unit(8, "pt"),
+        legend.key.width  = unit(8, "pt")) 
+p_filt
+
+# ggsave(path="../03.Output/05.MO_IM_diversity","/Phylum_composition_nodule.pdf", p_filt , width = 6, height = 3.7)
+
+```
+
+
+# 4.genus
+```{r}
+(ps.rarefied.Genus<- aggregate_taxa(ps.rarefied.asv, "Genus"))  
+(ps.rarefied.Genus.filt.rna <- subset_samples(ps.rarefied.Genus,ID %in% metadata_rna$ID))
+(ps.rarefied.Genus.filt.rna <- prune_taxa(taxa_sums(ps.rarefied.Genus.filt.rna) > 0, ps.rarefied.Genus.filt.rna))
+sample_data(ps.rarefied.Genus.filt.rna) <- sample_data(metadata_rna)
+
+ps <- microbiome::transform(ps.rarefied.Genus.filt.rna,"compositional")
+
+metadata <- sample_data(ps) %>% data.frame()
+otutable <- otu_table(ps) %>% data.frame()
+taxtable <- tax_table(ps) %>% data.frame()
+
+#genus
+taxtable <- taxtable %>%
+  mutate(taxa=ifelse(Genus=="g__","Others",Genus)) 
+otutable <- otutable[rownames(taxtable),]
+
+#genus
+otutable$taxa <- taxtable$taxa
+
+otutable <- aggregate(otutable[,1:189],by=list(otutable$taxa),FUN=sum) 
+otutable <- otutable %>%
+  tibble::column_to_rownames(var="Group.1")
+
+mean_sort_filt = otutable[(order(-rowSums(otutable))), ] # decrease sort
+colSums(mean_sort_filt)
+
+#genus
+mean_sort_filt=as.data.frame(mean_sort_filt)
+other_filt = colSums(mean_sort_filt[c(1,12:dim(mean_sort_filt)[1]), ])
+mean_sort_filt = mean_sort_filt[2:11, ]
+mean_sort_filt= rbind(mean_sort_filt,other_filt)
+rownames(mean_sort_filt)[11] = c("Others")
+colSums(mean_sort_filt)
+
+idx = rownames(metadata) %in% colnames(mean_sort_filt) 
+metadata= metadata[idx,]
+mean_sort_filt = mean_sort_filt[, rownames(metadata)] # reorder according to design
+
+mean_sort_filt_t <- t(mean_sort_filt) %>% as.data.frame()
+mean_sort_filt_t <- mean_sort_filt_t[order(mean_sort_filt_t[,1],mean_sort_filt_t[,2],
+                                           mean_sort_filt_t[,3],mean_sort_filt_t[,4],
+                                           mean_sort_filt_t[,5],mean_sort_filt_t[,6],
+                                           mean_sort_filt_t[,7],mean_sort_filt_t[,8],
+                                           mean_sort_filt_t[,9],mean_sort_filt_t[,10]
+                                           ),]
+
+data_all_filt <- t(mean_sort_filt_t) %>% as.data.frame() %>% 
+  tibble::rownames_to_column(var="Genus") %>%
+  reshape2::melt(id.vars="Genus") %>% 
+  merge(.,metadata[,c("ID","nodule1")],by.x="variable",by.y="ID",sort=FALSE)
+
+data_all_filt$Genus<-factor(data_all_filt$Genus,
+                            levels = rownames(mean_sort_filt)) 
+
+
+# genus
+col <-c(  "#BC80BD", "#FFFFB3", "#BEBADA", "#FB8072", "#80B1D3",
+         "#FDB462", "#B3DE69", "#FCCDE5", "#CCEBC5","#D9D9D9",
+         "#8DD3C7")
+p_filt <- ggplot(data_all_filt, aes(x=rev(variable), y = value, fill=Genus)) +
+  geom_bar(stat="identity", position = 'fill')+
+  facet_grid(~nodule1,scales = "free", space = "free")+
+  xlab("") +
+  ylab("Relative abundance (%)") +
+  scale_fill_manual(values = col)+
+  scale_y_continuous(expand = c(0,0)) +
+  guides(fill=guide_legend(title="Genus",nrow=4)) +
+  theme(panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.background=element_blank(),
+        panel.border =  element_rect(fill=NA,size=0.1), #element_rect(fill=NA),
+        panel.spacing.x = unit(0.05,"cm"),
+        axis.text.x= element_blank(),  #angle=45,vjust=1, hjust=1
+        axis.text.y=element_text(color='black', size=12), 
+        axis.ticks.x= element_blank(),
+        axis.title.x = element_blank(), 
+        axis.title.y = element_text(color='black', size=14), 
+        axis.ticks.length.y =unit(0.05, "cm"),
+        axis.ticks.y = element_line(color='black', size=0.1),
+        strip.text = element_text(size=12), #16
+        strip.background = element_rect(fill=NA,size=0.5),
+        legend.position = "bottom",
+        legend.title=element_text(color='black', size=14),
+        legend.text = element_text(face="italic",size=12),
+        legend.key=element_blank(),
+        legend.key.height = unit(8, "pt"),
+        legend.key.width  = unit(8, "pt")) 
+p_filt
+
+# ggsave(path="../03.Output/05.MO_IM_diversity","/Genus_composition_nodule.pdf", p_filt ,width = 6, height = 4.2)
+
+```

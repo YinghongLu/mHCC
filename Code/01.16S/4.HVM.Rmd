@@ -1,0 +1,567 @@
+---
+title: "4.HVM"
+author: "yinghong"
+date: "2024-04-23"
+output: html_document
+---
+
+# 1.count-asv to genus
+```{r}
+dir.create("../03.Output/04.HVM")
+
+load(file ="../03.Output/02.tax/ps.unrarefied.asv.Rdata")
+
+ps.unrarefied.asv
+colSums(otu_table(ps.unrarefied.asv))
+view(otu_table(ps.unrarefied.asv))
+
+(ps.unrarefied.Genus <- aggregate_taxa(ps.unrarefied.asv, "Genus")) 
+colSums(otu_table(ps.unrarefied.Genus))
+view(otu_table(ps.unrarefied.Genus))
+
+ps.unrarefied.asv.Genus <- ps.unrarefied.Genus 
+ps.unrarefied.asv.Genus
+# save(ps.unrarefied.asv.Genus,file="../03.Output/04.HVM/ps.unrarefied.asv.Genus.Rdata")
+
+```
+
+# 2.re-asv to genus 
+```{r}
+(ps.unrarefied.asv.re <- microbiome::transform(ps.unrarefied.asv, "compositional"))  
+colSums(otu_table(ps.unrarefied.asv.re))
+view(otu_table(ps.unrarefied.asv.re))
+
+(ps.unrarefied.asv.Genus.re <- aggregate_taxa(ps.unrarefied.asv.re, "Genus"))  
+colSums(otu_table(ps.unrarefied.asv.Genus.re))
+view(otu_table(ps.unrarefied.asv.Genus.re))
+
+# save(ps.unrarefied.asv.Genus.re,file="../03.Output/04.HVM/ps.unrarefied.asv.Genus.re.Rdata")
+
+```
+
+# 3.pseudo-count of 1
+```{r}
+
+ps.unrarefied.asv.1 <- ps.unrarefied.asv
+otu_table(ps.unrarefied.asv.1) <- otu_table(ps.unrarefied.asv)+1
+colSums(otu_table(ps.unrarefied.asv.1))
+view(otu_table(ps.unrarefied.asv.1))
+
+(ps.unrarefied.asv.1.re <- microbiome::transform(ps.unrarefied.asv.1, "compositional"))  
+otu_table(ps.unrarefied.asv.1.re) <- otu_table(ps.unrarefied.asv.1.re)*1000000
+colSums(otu_table(ps.unrarefied.asv.1.re))
+view(otu_table(ps.unrarefied.asv.1.re))
+
+(ps.unrarefied.asv.1.Genus <- aggregate_taxa(ps.unrarefied.asv.1.re, "Genus"))  
+colSums(otu_table(ps.unrarefied.asv.1.Genus))
+view(otu_table(ps.unrarefied.asv.1.Genus))
+
+# save(ps.unrarefied.asv.1.Genus,file="../03.Output/04.HVM/ps.unrarefied.asv.1.Genus.Rdata")
+
+```
+
+# 4.HVM
+```{r}
+load(file="../03.Output/04.HVM/ps.unrarefied.asv.Genus.Rdata")
+load(file="../03.Output/04.HVM/ps.unrarefied.asv.Genus.re.Rdata")
+load(file="../03.Output/04.HVM/ps.unrarefied.asv.1.Genus.Rdata")
+ps.unrarefied.asv.Genus
+ps.unrarefied.asv.Genus.re
+ps.unrarefied.asv.1.Genus
+
+otu_filt <- otu_table(ps.unrarefied.asv.Genus)  %>% data.frame
+per_filt <- otu_table(ps.unrarefied.asv.Genus.re)  %>% data.frame
+per_filt_1 <- otu_table(ps.unrarefied.asv.1.Genus)  %>% data.frame
+
+metadata <- sample_data(ps.unrarefied.asv.Genus) %>% data.frame
+write.csv(metadata,"../03.Output/04.HVM/metadata.csv")
+
+idx_filt=colnames(per_filt) %in% rownames(metadata)
+per_filt=per_filt[,idx_filt]
+per_filt_1 <-  per_filt_1[,idx_filt]
+metadata <- metadata[colnames(per_filt),]
+metadata[,c("Patient","Group2")] <- lapply(metadata[,c("Patient","Group2")],factor)
+
+otu_filt_t <- t(otu_filt)
+merge_count_ASV  <- merge(metadata[c("Patient","Group2")],otu_filt_t,by="row.names")
+merge_count_ASV  <- merge_count_ASV  %>%
+  tibble::column_to_rownames("Row.names") 
+write.csv(merge_count_ASV,"../03.Output/04.HVM/merge_count_ASV.csv")
+
+colSums(per_filt)
+per_filt_t <- t(per_filt)
+merge_per_ASV <- merge(metadata[c("Patient","Group2")],per_filt_t,by="row.names")
+merge_per_ASV <- merge_per_ASV %>%
+  tibble::column_to_rownames("Row.names") 
+write.csv(merge_per_ASV,"../03.Output/04.HVM/merge_per_ASV.csv")
+
+colSums(per_filt_1)
+per_filt_1_t <- t(per_filt_1)
+merge_per_ASV_1 <- merge(metadata[c("Patient","Group2")],per_filt_1_t,by="row.names")
+merge_per_ASV_1 <- merge_per_ASV_1 %>%
+  tibble::column_to_rownames("Row.names") 
+write.csv(merge_per_ASV_1,"../03.Output/04.HVM/merge_per_ASV_1.csv")
+
+length(metadata$Group2[!metadata$Group2=="L"])
+
+merge_count_ASV_tumor <- merge_count_ASV[!merge_count_ASV$Group2=="L",]
+merge_count_ASV_tumor <- merge_count_ASV_tumor[,-c(1:2)]
+merge_count_ASV_tumor <- merge_count_ASV_tumor [rowSums(merge_count_ASV_tumor )>0,]
+merge_count_ASV_tumor <- merge_count_ASV_tumor[,colSums(merge_count_ASV_tumor)>0]
+write.csv(merge_count_ASV_tumor,"../03.Output/04.HVM/merge_count_ASV_tumor.csv")
+
+merge_per_ASV_tumor <- merge_per_ASV[!merge_per_ASV$Group2=="L",]
+merge_per_ASV_tumor <- merge_per_ASV_tumor[,-c(1:2)]
+merge_per_ASV_tumor <- merge_per_ASV_tumor [rowSums(merge_per_ASV_tumor )>0,]
+merge_per_ASV_tumor <- merge_per_ASV_tumor[,colSums(merge_per_ASV_tumor)>0]
+write.csv(merge_per_ASV_tumor,"../03.Output/04.HVM/merge_per_ASV_tumor.csv")
+
+```
+
+# 5.log.diff.cv
+```{r}
+data_log_ASV <- list()
+for (i in 1:length(levels(metadata$Patient))){
+  for (j in levels(metadata$Patient)[i]){
+    print(j)
+    mergej <- merge_per_ASV_1[merge_per_ASV_1$Patient==j,]
+    mergej <- mergej[,-1]
+    mergej_t <- t(mergej) %>% data.frame
+    colnames(mergej_t) <- mergej_t[1,]
+    mergej_t <- mergej_t[-1,] 
+    data_log_p_ASV <- data.frame(rep(c(0),843)) 
+    for (v in 1:length(mergej$Group2[!mergej$Group2=="L"])){
+      for (z in mergej$Group2[!mergej$Group2=="L"][v]){
+        print(z)
+        data_log_p_ASV[,v]<-as.data.frame(log2(as.numeric(mergej_t[,z])/as.numeric(mergej_t[,"L"])))
+        colnames(data_log_p_ASV)[v] <- z 
+        rownames(data_log_p_ASV) <- rownames(mergej_t)
+      }  
+    }
+    data_log_ASV[[i]] <- data_log_p_ASV 
+    names(data_log_ASV)[[i]] <- j
+  }
+}
+
+# log2 >=1 
+data_log_ASV_1 <- list()
+for (m in 1:58){
+  data_log_ASV_1[m] <- list(data_log_ASV[[m]][apply(abs(data_log_ASV[[m]]),1, function(x)max(x)>=1),])
+  names(data_log_ASV_1)[m] <- names(data_log_ASV)[[m]]
+}
+
+####
+data_diff_ASV <- list()
+for (i in 1:length(levels(metadata$Patient))){
+  for (j in levels(metadata$Patient)[i]){
+    print(j)
+    mergej <- merge_per_ASV[merge_per_ASV$Patient==j,]
+    mergej <- mergej[,-1]
+    mergej_t <- t(mergej) %>% data.frame
+    colnames(mergej_t) <- mergej_t[1,]
+    mergej_t <- mergej_t[-1,] 
+    data_diff_p_ASV <- data.frame(rep(c(0),843)) 
+    for (v in 1:length(mergej$Group2[!mergej$Group2=="L"])){
+      for (z in mergej$Group2[!mergej$Group2=="L"][v]){
+        print(z)
+        data_diff_p_ASV[,v]<-as.data.frame(as.numeric(mergej_t[,z])-as.numeric(mergej_t[,"L"]))
+        colnames(data_diff_p_ASV)[v] <- z 
+        rownames(data_diff_p_ASV) <- rownames(mergej_t)
+      }  
+    }
+    data_diff_ASV[[i]] <- data_diff_p_ASV 
+    names(data_diff_ASV)[[i]] <- j
+  }
+}
+
+# diff >=0.1%
+data_diff_ASV_1 <- list()
+for (m in 1:58){
+  data_diff_ASV_1[m] <- list(data_diff_ASV[[m]][apply(abs(data_diff_ASV[[m]]),1, function(x)max(x)>=0.001),])
+  names(data_diff_ASV_1)[m] <- names(data_diff_ASV)[[m]]
+}
+
+data_CV_ASV <- matrix(nrow=843,ncol = 58)
+colnames(data_CV_ASV) <- levels(metadata$Patient)
+rownames(data_CV_ASV) <- colnames(merge_per_ASV[,-c(1:2)])
+for (i in 1:length(levels(metadata$Patient))){
+  for (j in levels(metadata$Patient)[i]){
+    print(j)
+    mergej <- merge_per_ASV[merge_per_ASV$Patient==j,]
+    mergej <- mergej[,-1]
+    mergej_t <- t(mergej) %>% data.frame
+    colnames(mergej_t) <- mergej_t[1,]
+    mergej_t <- mergej_t[-1,] 
+    mergej_t <- subset(mergej_t,select = -L)
+    name <- rownames(mergej_t)
+    mergej_t <-lapply(mergej_t,as.numeric) %>% data.frame
+    rownames(mergej_t) <- name
+    mergej_t$CV <- apply(mergej_t, 1, function(x) (sd(x)/mean(x)))
+    data_CV_ASV[,i] <- mergej_t$CV
+  }
+}
+
+####cvequality
+data_cv_ASV <- list()
+asymptotic_test_result_ASV <- list()
+
+for (i in 1:length(levels(metadata$Patient))){
+  for (j in levels(metadata$Patient)[i]){
+    print(j)
+    mergej <- merge_per_ASV[merge_per_ASV$Patient==j,]
+    mergej <- mergej[,-1]
+    mergej_t <- t(mergej) %>% data.frame
+    colnames(mergej_t) <- mergej_t[1,]
+    mergej_t <- mergej_t[-1,] 
+    mergej_t <- subset(mergej_t,select = -L)
+    name <- rownames(mergej_t)
+    mergej_t <-lapply(mergej_t,as.numeric) %>% data.frame
+    rownames(mergej_t) <- name
+    mergej_t$n <- rep(dim(mergej_t)[2],dim(mergej_t)[1])
+    mergej_t$sd <- apply(mergej_t[,1:length(mergej$Group2[!mergej$Group2=="L"])], 1, function(x) sd(x))
+    mergej_t$mean <- apply(mergej_t[,1:length(mergej$Group2[!mergej$Group2=="L"])], 1, function(x) mean(x))
+    mergej_t$CV <-  mergej_t$sd/mergej_t$mean
+    mergej_t <- mergej_t[rowSums(mergej_t[,1:mergej_t$n[1]])>0,]
+    asymptotic_test_result_ASV <- list()
+    for (v in 1:dim(mergej_t)[1]){
+      miller1 <- data.frame(test = c('CV','CV0'),
+                            Mean = rep(mergej_t$mean[v],2),
+                            CV = c(mergej_t$CV[v],0),
+                            N = rep(mergej_t$n[v],2))
+      miller1$SD <- with(miller1, CV * Mean)
+      asymptotic_test_result_ASV[[v]] <- asymptotic_test2(k = nrow(miller1), 
+                                                      n = miller1$N, 
+                                                      s = miller1$SD, 
+                                                      x = miller1$Mean)
+    }
+    names(asymptotic_test_result_ASV) <- rownames(mergej_t)
+    data_cv_ASV[[i]] <-  asymptotic_test_result_ASV
+    names(data_cv_ASV)[[i]] <- j
+    for (v in 1:dim(mergej_t)[1]){
+      data_cv_ASV[[i]][[v]]$CV <- mergej_t[v,]$CV
+      data_cv_ASV[[i]][[v]]$N <- mergej_t[v,]$n
+    }
+  }
+}
+
+data_cv_ASV_1 <- list()
+for (m in 1:58){
+  data_cv_ASV_1[[m]] <- do.call(rbind,data_cv_ASV[[m]]) %>% data.frame
+  data_cv_ASV_1[[m]]$p_adjust <- p.adjust(data_cv_ASV_1[[m]]$p_value, method =  "fdr", n = length(data_cv_ASV_1[[m]]$p_value))
+  names(data_cv_ASV_1)[[m]] <- names(data_cv_ASV)[[m]]
+}
+
+
+d_ASV <- list()
+for (i in 1:length(levels(metadata$Patient))){
+  for (j in levels(metadata$Patient)[i]){
+    print(j)
+    a_ASV  <- rownames(as.data.frame(data_log_ASV_1[[i]]))
+    b_ASV  <- rownames(as.data.frame(data_diff_ASV_1[[i]]))
+    c_ASV  <- rownames(data_CV_ASV)[which(subset(data_CV_ASV,select = c(j))>=0.5)]
+    d_ASV [[i]] <- intersect(intersect(a_ASV,b_ASV),c_ASV)
+    names(d_ASV)[[i]] <- j
+  }
+}
+
+# save(data_log_ASV,data_log_ASV_1,
+#      data_diff_ASV,data_diff_ASV_1,
+#      data_CV_ASV,data_cv_ASV ,asymptotic_test_result_ASV,data_cv_ASV_1,
+#      d_ASV,file="../03.Output/04.HVM/HVM_3criteria.Rdata")
+
+
+e_ASV <- list()
+for (i in 1:length(levels(metadata$Patient))){
+  for (j in levels(metadata$Patient)[i]){
+    print(j)
+    a_ASV  <- as.data.frame(data_log_ASV_1[[i]])
+    b_ASV  <- as.data.frame(data_diff_ASV_1[[i]])
+    c_ASV  <- rownames(data_CV_ASV)[which(subset(data_CV_ASV,select = c(j))>=0.5)]
+    e_ASV [[i]] <- intersect(intersect(a_ASV,b_ASV),c_ASV)
+    names(d_ASV)[[i]] <- j
+  }
+}
+
+```
+
+# 6.filter
+```{r}
+load(file="../03.Output/04.HVM/HVM_3criteria.Rdata")
+
+metadata <- read.csv("../03.Output/04.HVM/metadata.csv",row.names = 1)
+metadata$Patient <- factor(metadata$Patient)
+
+d_ASV_1  <- sort(table(unlist(d_ASV ))) %>% data.frame 
+d_ASV_1$Var1 <- as.character(d_ASV_1$Var1)
+
+Count <- data.frame(Patient=levels(metadata$Patient),count=rep(NA,length(levels(metadata$Patient))))
+for (i in 1:length(levels(metadata$Patient))){
+  for (j in levels(metadata$Patient)[i]){
+    print(j)
+    Count[Count$Patient==j,]$count <- length(d_ASV[[i]][d_ASV[[i]] %in% d_ASV_1$Var1])
+  }
+}
+Count$Patient <- factor(Count$Patient) #,levels = levels(metadata$Patient)
+# cust_label <- read.csv("../03.Output/03.diversity/cust_label.csv" )
+# cust_label <- setNames(cust_label$x, cust_label$X) 
+
+mean(Count$count)
+p_count <- ggplot(Count,aes(x=Patient,y=count)) +
+  geom_bar(stat = 'identity',color="black",fill="#1b9e77",width = 0.8,position = position_dodge(width=0.5),size=0.2)+
+  geom_text(aes(label = count),color="black",position=position_dodge(width = 1),size = 2.5,vjust = -0.3)+ 
+  labs(x = '', y = 'Number of HVMs')+
+  geom_hline(aes(yintercept=mean(count)),colour="black", linetype="dashed",size=0.2)+
+    annotate('text', label = "Mean = 94 ",
+           x = 5, y = 100, size = 5) +
+  scale_y_continuous(expand = c(0,0),limits = c(0,180)) +
+  scale_x_discrete(labels=cust_label)+
+  theme(panel.background=element_rect(fill="white"),
+        panel.border = element_rect(fill=NA,size=0.2),
+        axis.title.x=element_blank(), 
+        axis.title.y=element_text(size=14), 
+        axis.line=element_line(size=0.2), 
+        axis.ticks=element_line(color='black', size=0.2),
+        axis.text.y =   element_text(color="black",size=12),
+        axis.text.x =   element_text(color="black",
+                                     angle=90, 
+                                     hjust = 1, 
+                                     vjust = 0.5,
+                                     size=12))  
+
+p_count
+# ggsave(path="../03.Output/04.HVM", "/count_HVM.pdf",p_count,width=9.7,height=5)
+
+p_HVM_patients <- ggplot(d_ASV_1,aes(x=Var1,y=Freq)) +
+  geom_bar(stat = 'identity',color="black",fill="#d95f02",width = 0.6,position = position_dodge(width=1),size=0.2)+
+  geom_text(aes(label = Freq),color="black",position=position_dodge(width = 1),size = 4,hjust=-0.5)+
+  ggtitle("Rank of High-variable microbes (HVMs) in multifocal HCC") +
+  labs(x = '', y = 'Number of patients')+
+  coord_flip()+
+  scale_y_continuous(expand = c(0,0),limits = c(0,55)) +
+  scale_x_discrete(labels=cust_label)+
+  theme(panel.background=element_rect(fill="white"),
+        panel.border = element_rect(fill=NA,size=0.2),
+        plot.title = element_text(hjust = 0.5,size=14),
+        axis.title =  element_text(size=14),
+        axis.line=element_line(size=0.2), 
+        axis.ticks=element_line(color='black', size=0.2),
+        axis.text.y =   element_text(color="black",size=12,face="italic"),
+        axis.text.x =   element_text(color="black",size=12))  
+
+p_HVM_patients
+# ggsave(path="../03.Output/04.HVM","/name_HVM_patients.pdf",p_HVM_patients,width=8,height=5.5)
+
+merge_count_ASV_tumor_t <- t(merge_count_ASV_tumor) %>% as.data.frame()
+merge_count_ASV_tumor_t$sum <- apply(merge_count_ASV_tumor_t,1,function(x){ sum(x>0) } )  
+merge_count_ASV_tumor_t <- merge_count_ASV_tumor_t[order(merge_count_ASV_tumor_t$sum,decreasing = T ),]
+merge_count_ASV_tumor_t <- cbind(rownames(merge_count_ASV_tumor_t),merge_count_ASV_tumor_t$sum) %>% as.data.frame()
+
+merge_count_ASV_tumor_t$V1 <- as_factor(merge_count_ASV_tumor_t$V1)
+merge_count_ASV_tumor_t$V2 <- as.numeric(merge_count_ASV_tumor_t$V2)
+merge_count_ASV_tumor_t <- merge_count_ASV_tumor_t[1:12,]
+
+p_HVM_samples <- ggplot(merge_count_ASV_tumor_t,aes(x=V1,y=V2)) +
+  geom_bar(stat = 'identity',color="black",fill="#d95f02",width = 0.8,position = position_dodge(width=1),size=0.2)+
+  geom_text(aes(label = V2),color="black",position=position_dodge(width = 1),size = 1.5,hjust=-0.5)+
+  ggtitle("Top High-variable microbes (HVMs) in mHCC") +
+  labs(x = '', y = 'Number of samples')+
+  coord_flip()+
+  scale_y_continuous(expand = c(0,0),limits = c(0,200)) +
+  scale_x_discrete(labels=cust_label)+
+  theme(panel.background=element_rect(fill="white"),
+        panel.border = element_rect(fill=NA,size=0.2),
+        plot.title = element_text(hjust = 0.5,size=7),
+        axis.title =  element_text(size=6),
+        axis.line=element_line(size=0.2), 
+        axis.ticks=element_line(color='black', size=0.2),
+        axis.text.y =   element_text(color="black",size=5,face="italic"),
+        axis.text.x =   element_text(color="black",size=5)) 
+
+p_HVM_samples
+ggsave(path="../03.Output/04.HVM","/name_HVM_samples.pdf",p_HVM_samples,width=8,height=5.5,units = "cm")
+
+```
+
+# 
+```{r}
+library(RColorBrewer)
+qual_col_pals = brewer.pal.info[brewer.pal.info$category == 'qual',]
+col_vector = unlist(mapply(brewer.pal, qual_col_pals$maxcolors, rownames(qual_col_pals))) 
+save(col_vector,file="../03.Output/04.HVM/col_vector.Rdata")
+load(file="../03.Output/04.HVM/col_vector.Rdata")
+
+```
+
+# 7.heatmap
+```{r}
+dir.create("../03.Output/04.HVM/patient")
+
+HVM_ASV <- c("g__Streptococcus",
+             "g__Stenotrophomonas",
+             "g__Lactobacillus",
+             "g__Acinetobacter",
+             "g__Enterococcus",
+             "g__Corynebacterium",
+             "g__Prevotella", 
+             "g__Bacteroides"
+             )
+
+mycol4 <- colorRamp2(c(-1.5, 0, 1.5), c("#145593", "white","firebrick3"))
+
+cust_label <- cust_label %>% as.data.frame()
+cust_label$name <- rownames(cust_label)
+colnames(cust_label) <- c("name_change","name")
+
+###PDF
+# PDF
+calc_ht_size = function(ht, unit = "inch") {
+  pdf(NULL)
+  ht = draw(ht)
+  w = ComplexHeatmap:::width(ht)
+  w = convertX(w, unit, valueOnly = TRUE)
+  h = ComplexHeatmap:::height(ht)
+  h = convertY(h, unit, valueOnly = TRUE)
+  dev.off()
+  c(w, h)
+}
+for (i in 1:length(levels(metadata$Patient))){
+  for (j in levels(metadata$Patient)[i]){
+    print(j)
+    mergej <- merge_count_ASV[merge_count_ASV$Patient==j,]
+    mergej <- mergej[,-1]
+    mergej_t <- t(mergej) %>% data.frame
+    colnames(mergej_t) <- mergej_t[1,]
+    mergej_t <- mergej_t[-1,]
+    mergej_t <- subset(mergej_t,select = -L)
+    name <- rownames(mergej_t)
+    mergej_t <-lapply(mergej_t,as.numeric) %>% data.frame
+    rownames(mergej_t) <- name
+    mergej_t <- mergej_t[d_ASV[[i]][d_ASV[[i]] %in% d_ASV_1$Var1],]
+    e <-data_log_ASV[[i]][d_ASV[[i]][d_ASV[[i]] %in% d_ASV_1$Var1],] %>% data.frame
+    scale_row_e <- apply(e, 1, scale)
+    rownames(scale_row_e) <- colnames(e)
+    scale_row_e <- as.matrix(t(scale_row_e))
+    HVMmark <- which(rownames(e) %in% HVM_ASV)
+    labs <- rownames(e)[HVMmark]
+    ha <-  rowAnnotation(
+      foo = anno_mark(at = HVMmark,
+                      labels = labs, 
+                      link_gp = gpar(lwd=0.5),
+                      link_width = unit(2, "mm"),
+                      labels_gp = gpar(fontsize = 6,
+                                       fontface = "italic")),
+      show_annotation_name=F
+    ) 
+    p <- Heatmap(scale_row_e, 
+                 col =mycol4,  
+                 cluster_rows = T,
+                 row_dend_width = unit(2, "mm"),
+                 row_dend_gp = gpar(lwd=0.5),
+                 show_row_names = F,
+                 # column_title=j,
+                 cluster_columns =  T,
+                 column_dend_height = unit(2, "mm"),
+                 column_dend_gp = gpar(lwd=0.5),
+                 column_names_rot = 0,
+                 column_names_centered = TRUE,
+                 column_title=paste0(cust_label[cust_label$name==j,]$name_change),
+                 column_title_gp=gpar(fontsize = 8), #18
+                 row_names_gp = gpar(fontsize = 1),
+                 column_names_gp = gpar(fontsize = 5),
+                 right_annotation = ha,
+                 show_heatmap_legend = F,
+                 width=unit(4, "mm")*ncol(scale_row_e),
+                 height = unit(0.25, "mm")*nrow(scale_row_e))
+    print(p)
+    size = calc_ht_size(p)
+    width = size[1]
+    height = size[2]
+    pdf(paste0("../03.Output/04.HVM/patient/",paste0(j,".pdf")), height = height , width =width)
+    print(p)
+    dev.off()
+  }
+}
+
+```
+
+# 8.f_log.diff.cv
+```{r}
+
+f_log <- list()
+for (i in 1:length(levels(metadata$Patient))){
+  for (j in levels(metadata$Patient)[i]){
+    print(j)
+    f_log[[i]] <- data_log_ASV[[i]][d_ASV[[i]][d_ASV[[i]] %in% d_ASV_1$Var1],] %>% data.frame
+    names(f_log)[[i]] <- j
+    write.table(f_log[[i]], paste0('../03.Output/04.HVM/patient/HVMs_log_',j,'.txt'), sep = '\t', quote = FALSE, row.names = TRUE)
+  }
+}
+
+f_relabun <- list()
+for (i in 1:length(levels(metadata$Patient))){
+  for (j in levels(metadata$Patient)[i]){
+    print(j)
+    mergej <- merge_per_ASV[merge_per_ASV$Patient==j,]
+    mergej <- mergej[,-1]
+    mergej_t <- t(mergej) %>% data.frame
+    colnames(mergej_t) <- mergej_t[1,]
+    mergej_t <- mergej_t[-1,] 
+    mergej_t <- subset(mergej_t,select = -L)
+    name <- rownames(mergej_t)
+    mergej_t <-lapply(mergej_t,as.numeric) %>% data.frame
+    rownames(mergej_t) <- name
+    f_relabun[[i]] <- mergej_t[d_ASV[[i]][d_ASV[[i]] %in% d_ASV_1$Var1],] %>% data.frame
+    names(f_relabun)[[i]] <- j
+    write.table(f_relabun[[i]], paste0('../03.Output/04.HVM/patient/HVMs_relabun_',j,'.txt'), sep = '\t', quote = FALSE, row.names = TRUE)
+  }
+}
+
+f_count <- list()
+for (i in 1:length(levels(metadata$Patient))){
+  for (j in levels(metadata$Patient)[i]){
+    print(j)
+    mergej<- merge_count_ASV[merge_count_ASV$Patient==j,]
+    mergej<- mergej[,-1]
+    mergej_t <- t(mergej) %>% data.frame
+    colnames(mergej_t) <- mergej_t[1,]
+    mergej_t <- mergej_t[-1,] 
+    mergej_t <- subset(mergej_t,select = -L)
+    name <- rownames(mergej_t)
+    mergej_t <-lapply(mergej_t,as.numeric) %>% data.frame
+    rownames(mergej_t) <- name
+    f_count[[i]] <- mergej_t[d_ASV[[i]][d_ASV[[i]] %in% d_ASV_1$Var1],] %>% data.frame
+    names(f_count)[[i]] <- j
+    write.table(f_count[[i]], paste0('../03.Output/04.HVM/patient/HVMs_count_',j,'.txt'), sep = '\t', quote = FALSE, row.names = TRUE)
+  }
+}
+
+# save(f_log,f_relabun,f_count,
+#      file = "../03.Output/04.HVM/f_log_relabun_count.Rdata")
+
+dir.create("../03.Output/04.HVM/network")
+for (i in 1:length(levels(metadata$Patient))){
+  for (j in levels(metadata$Patient)[i]){
+    print(j)
+    otu <- f_count[[i]]
+    edge <- f_count[[i]]
+    edge$OTU <- rownames(edge)
+    edge <- reshape2::melt(edge, id = 'OTU')
+    edge1 <- f_log[[i]]
+    edge1$OTU <- rownames(edge1)
+    edge1 <- reshape2::melt(edge1, id = 'OTU')
+    names(edge) <- c('source', 'target', 'weight')
+    edge$log <- edge1$value
+    edge <- subset(edge, weight != 0)
+    edge$'shared name' <- paste(edge$source, edge$target, sep = '->')
+    edge$direction <- ifelse(edge$log>0,"POS","NEG")
+    edge$size <- abs(edge$log) 
+    otu[otu>0] <- 1
+    otu$color <- ifelse(rowSums(otu)==1,"specific","shared")
+    otu <- otu[unique(edge$source), ]
+    edge$color <- otu[match(edge$source,rownames(otu)),]$color
+    write.table(edge, paste0('../03.Output/04.HVM/network/edge_',j,'.txt'), sep = '\t', quote = FALSE, row.names = FALSE)
+  }
+}
+
+
+```

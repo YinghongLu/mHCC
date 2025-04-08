@@ -75,7 +75,6 @@ exprSet_rpkm_coding_half <- half_filter_genes(exprSet_rpkm_coding);dim(exprSet_r
 exprSet_tpm_coding_half <- half_filter_genes(exprSet_rpkm_to_tpm_coding);dim(exprSet_tpm_coding_half) 
 exprSet_counts_coding_half_vst <- vst(as.matrix(round(exprSet_counts_coding_half))) ;dim(exprSet_counts_coding_half_vst) 
 
-
 sd_filter_genes <- function(genes, qt){
   genes.sd <- transform(as.data.frame(genes), SD=apply(as.data.frame(genes),1,sd, na.rm = TRUE))
   ## select top genes with high SD (~ variability) across samples
@@ -104,7 +103,7 @@ table(stas$Tumor)
 table(colnames(exprSet_counts_coding_half_filt) %in% rownames(metadata)) 
 write.csv(stas,"../stas.csv")
 
-########## 保存数据
+########## 
 save(exprSet_counts,exprSet_rpkm,exprSet_rpkm_to_tpm,
      exprSet_counts_coding,exprSet_rpkm_coding ,exprSet_rpkm_to_tpm_coding,
      exprSet_counts_coding_half,exprSet_rpkm_coding_half,exprSet_tpm_coding_half,exprSet_counts_coding_half_vst,
@@ -188,8 +187,6 @@ write.csv(metadata_MO_rna,"../03.Output/04.IM_MO/metadata_MO_rna.csv") #
 save(metadata_rna,metadata_mix_rna,metadata_nodule_rna,metadata_IM_rna,metadata_MO_rna,
      file="../03.Output/04.IM_MO/metadata_rna.Rdata")
 
-load(file="../03.Output/04.IM_MO/metadata_rna.Rdata")
-
 ```
 
 ### EMT geneset
@@ -262,13 +259,10 @@ expr_vsd_filt_MO <- expr_vsd_filt
 expr_vsd_filt_MO <- expr_vsd_filt_MO[,rownames(metadata_MO_rna)]
 expr_vsd_filt_MO <- expr_vsd_filt_MO[complete.cases(expr_vsd_filt_MO),] 
 
-
 save(expr_count_filt_nodule,expr_count_filt_IM,expr_count_filt_MO,expr_count_filt_mix,
      expr_tpm_filt_nodule,expr_tpm_filt_IM,expr_tpm_filt_MO,
      expr_vsd_filt_nodule,expr_vsd_filt_IM,expr_vsd_filt_MO,
      file = "../03.Output/04.IM_MO/expr_nodule_IM_MO.Rdata")
-
-load(file = "../03.Output/04.IM_MO/expr_nodule_IM_MO.Rdata")
 
 ```
 
@@ -307,10 +301,9 @@ resOrdered <- res[order(res$padj),]
 resOrdered
 tempDEG <- as.data.frame(resOrdered)
 DEG_DEseq2 <- na.omit(tempDEG)
-write.csv(DEG_DEseq2,"../03.Output/04.IM_MO/IMMO_DEG_DEseq2_original.csv",row.names = T)
+write.csv(DEG_DEseq2,"../03.Output/04.IM_MO/IMMO_DEG_DEseq2.csv",row.names = T)
 
 sum(res$padj < 0.1, na.rm=TRUE) 
-
 res05 <- results(dds, alpha=0.05)
 sum(res05$padj < 0.05, na.rm=TRUE) 
 ```
@@ -327,11 +320,10 @@ need_DEG$significance  <- as.factor(ifelse(need_DEG$padj < padj_cutoff & abs(nee
 need_DEG$SYMBOL <- rownames(need_DEG)
 need_DEG<- need_DEG[order(need_DEG$log2FoldChange),] 
 table(need_DEG$significance)
-write.csv(need_DEG,"../03.Output/04.IM_MO/IMMO_need_DEG_original.csv",row.names = T)
+write.csv(need_DEG,"../03.Output/04.IM_MO/IMMO_need_DEG.csv",row.names = T)
 
-#提取差异结果
 result_significance_keep <- need_DEG[!need_DEG$significance=="NOT",] 
-write.csv(result_significance_keep,"../03.Output/04.IM_MO/result_significance_keep_IM_MO_original.csv")
+write.csv(result_significance_keep,"../03.Output/04.IM_MO/result_significance_keep_IM_MO.csv")
 
 result_significance_up <- result_significance_keep[result_significance_keep$significance=="UP",]
 result_significance_down <- need_DEG[need_DEG$significance=="DOWN",]
@@ -344,7 +336,6 @@ rownames(result_significance_up)[rownames(result_significance_up) %in% hall_emt]
 
 result_significance_keep[result_significance_keep$significance=="DOWN",]$SYMBOL[result_significance_keep[result_significance_keep$significance=="DOWN",]$SYMBOL %in% EMT_genes_1184$GeneSymbol]
 
-###画火山图
 title <- paste0(' Up :  ',nrow(need_DEG[need_DEG$significance =='UP',]) ,
                 '\n Down : ',nrow(need_DEG[need_DEG$significance =='DOWN',]),
                 '\n FoldChange >= ',round(2^log2FC_cutoff,3))
@@ -357,29 +348,22 @@ cols <- c("#5B9BD5","#DE6757")
 p <- ggplot(data=need_DEG[-1,], 
             aes(x=log2FoldChange, y=-log10(padj), 
                 color=significance)) +
-  #点和背景
   geom_point(alpha=0.9, size=0.1) +
-  theme_classic()+ #无网格线
-  #坐标轴
+  theme_classic()+ 
   xlab("log2 ( FoldChange )") + 
   ylab("-log10 ( P.adjust )") +
-  #标题文本
   # ggtitle( title ) +
   annotate("rect", xmin = 1.4, xmax =3.4, ymin = 8.0, ymax = 9,
            alpha = .8,fill="#DE6757",color="black",linewidth = 0.2)+
   annotate("rect", xmin = -1.4, xmax =-3.8, ymin = 8.0, ymax = 9,
            alpha = .8,fill="#5B9BD5",color="black",linewidth = 0.2)+
-  
   annotate('text', label = paste0("UP: ",nrow(need_DEG[need_DEG$significance =='UP',]), sep = ""),
            x = 2.4, y = 8.5, size = 5,hjust = 0.5,color="black" ) +
   annotate('text', label = paste0("Down: ", nrow(need_DEG[need_DEG$significance =='DOWN',]), sep = ""),
            x = -2.6, y = 8.5, size = 5,hjust = 0.5,color="black") +
-              
   scale_colour_manual(values = c("#5B9BD5",'grey',"#DE6757"))+ 
-
   geom_vline(xintercept = c(-log2FC_cutoff,log2FC_cutoff),lty=4,col="grey",lwd=0.3) +
   geom_hline(yintercept = -log10(padj_cutoff),lty=4,col="grey",lwd=0.3) +
-
   geom_text_repel(data=top10sig,aes(x=log2FoldChange, y=-log10(padj),label=SYMBOL),
                   force=20,color="black",
                   size=3.5,
@@ -392,13 +376,10 @@ p <- ggplot(data=need_DEG[-1,],
                   min.segment.length = 0, seed = 42, box.padding = 0.5,
                   nudge_x=0,
                   nudge_y=0)+
-
-  theme( #plot.title = element_text(hjust = 0.5),
-    # panel.background=element_rect(fill="white"),
-    # panel.border = element_rect(fill=NA,size=0.2),
+  theme( 
     axis.line=element_line(size=0.2),   
-        plot.margin=unit(c(0.1,0,0.1,0.1),'lines'), #上右下左
-        legend.title = element_blank(), #不显示图例标题
+        plot.margin=unit(c(0.1,0,0.1,0.1),'lines'),
+        legend.title = element_blank(), 
         legend.position="top",
         axis.text.y =   element_text(color="black",size=12),
         axis.text.x =   element_text(color="black",size=12),
@@ -407,18 +388,14 @@ p <- ggplot(data=need_DEG[-1,],
         legend.key=element_blank(),
         legend.key.height = unit(3, "pt"),
         legend.key.width  = unit(3, "pt"),
-        )  #图例位置
-
+        )  
 p
-
-ggsave(path="../03.Output/04.IM_MO", "/IM_MO_original.pdf",width = 5.4, height = 4.2)
+ggsave(path="../03.Output/04.IM_MO", "/IM_MO.pdf",width = 5.4, height = 4.2)
 
 ```
 
-
 ## go
 ```{r}
-
 hg<-bitr(result_significance_up$SYMBOL,   
          fromType="SYMBOL",
          toType=c("ENTREZID","ENSEMBL","SYMBOL"),
@@ -440,13 +417,11 @@ ggsave(filename = '../03.Output/04.IM_MO/go_dotplot.pdf',width =6,height =4)
 
 ## KEGG
 ```{r}
-#KEGG分析
 kegg <- enrichKEGG(gene= hg$ENTREZID,
                    organism  = 'hsa',
                    pAdjustMethod = "BH",
                    pvalueCutoff = 0.05,
                    qvalueCutoff = 0.2)	 
-
 
 p_kegg <- dotplot(kegg,font.size=15)	
 p_kegg 
@@ -458,13 +433,12 @@ ggsave(filename = '../03.Output/04.IM_MO/kegg_dotplot.pdf',width =6,height =4)
 ```{r}
 source("../02.Code/kegg_plot_function.R")
 
-# GSEA富集分析
 hg<-bitr(need_DEG$SYMBOL, 
          fromType="SYMBOL",
          toType=c("ENTREZID","SYMBOL"),
          OrgDb="org.Hs.eg.db") 
-ENTREZID <- rep("NA",time = nrow(need_DEG))  #
-ENTREZID[match(hg$SYMBOL,need_DEG$SYMBOL)] <- hg$ENTREZID #
+ENTREZID <- rep("NA",time = nrow(need_DEG))  
+ENTREZID[match(hg$SYMBOL,need_DEG$SYMBOL)] <- hg$ENTREZID 
 need_DEG <- cbind(need_DEG,ENTREZID)
 geneList=need_DEG$log2FoldChange
 names(geneList)=need_DEG$ENTREZID
@@ -498,7 +472,6 @@ source("../02.Code/gsea_plot_function.R")
 
 h.all_gmt <- read.gmt("../01.Data/gmt/h.all.v2023.1.Hs.entrez.gmt")
 h.all_gmt$term <- gsub("HALLMARK_","",h.all_gmt$term)
-#预览转换格式后的gmt文件；
 head(h.all_gmt)
 
 need_DEG <- need_DEG[-1,]
@@ -507,8 +480,8 @@ hg<-bitr(need_DEG$SYMBOL,
          fromType="SYMBOL",
          toType=c("ENTREZID","SYMBOL"),
          OrgDb="org.Hs.eg.db") 
-ENTREZID <- rep("NA",time = nrow(need_DEG))  #
-ENTREZID[match(hg$SYMBOL,need_DEG$SYMBOL)] <- hg$ENTREZID #
+ENTREZID <- rep("NA",time = nrow(need_DEG))  
+ENTREZID[match(hg$SYMBOL,need_DEG$SYMBOL)] <- hg$ENTREZID 
 need_DEG <- cbind(need_DEG,ENTREZID)
 geneList=need_DEG$log2FoldChange
 names(geneList)=need_DEG$ENTREZID
@@ -529,7 +502,6 @@ up_h.all <- h.all_gse_cut_up[head(order(h.all_gse_cut_up$NES,decreasing = T),14)
 
 ### multiple pathway
 ```{r}
-
 gsea_plot <- function(up_gsea,down_gsea){
   dat=rbind(up_gsea,down_gsea)
   colnames(dat)
@@ -588,10 +560,9 @@ gsea_plot <- function(up_gsea,down_gsea){
 g2 = gsea_plot(up_h.all,down_h.all)
 g2
 
-ggsave( "../03.Output/04.IM_MO/hall_gsea_IM_MO_original.pdf",width = 6.2, height = 2.8)
+ggsave( "../03.Output/04.IM_MO/hall_gsea_IM_MO.pdf",width = 6.2, height = 2.8)
 
 ```
-
 
 ### single pathway
 ```{r}
@@ -609,7 +580,6 @@ gseap1 <- gseaplot2(h.all_res,
                     pvalue_table = T) 
 gseap1
 
-# 
 gseaScores <- getFromNamespace("gseaScores", "DOSE")
 
 # define function
@@ -636,14 +606,11 @@ gsInfo <- function(object, geneSetID) {
 
 gsdata <- gsInfo(h.all_res, geneSetID = up_h.all$Description[1])
 
-
 gsdata1 <- gsdata %>%
   mutate("gene_name" = need_DEG$SYMBOL) %>%
   filter(position == 1)
 
 head(gsdata1,3)
-
-# colnames
 colnames(gsdata1)
 
 # plot
@@ -651,7 +618,6 @@ pcurve <- ggplot(gsdata,aes(x = x,y = runningScore,color = runningScore)) +
   geom_hline(yintercept = 0,size = 0.1,color = 'black',
              lty = 'dashed') +
   geom_line() +
-
   theme_bw() +
   ggtitle("Epithelial mesenchymal transition") +
   scale_color_gradient(low = '#76BA99',high = '#EB4747') +
@@ -671,7 +637,6 @@ pcurve <- ggplot(gsdata,aes(x = x,y = runningScore,color = runningScore)) +
         legend.background = element_rect(fill = "transparent"),
         plot.margin = margin(t = .1,r = .1, b = 0,l = .1,unit = "mm")) +
   ylab('Running Enrichment Score')
-
 pcurve
 
 #
@@ -698,9 +663,7 @@ pseg
 v <- seq(1, sum(gsdata$position), length.out = 9)
 inv <- findInterval(rev(cumsum(gsdata$position)), v)
 if (min(inv) == 0) inv <- inv + 1
-
 col <- c(rev(brewer.pal(5, "Blues")), brewer.pal(5, "Reds"))
-
 ymin <- 0
 yy <- 0.3
 xmin <- which(!duplicated(inv))
@@ -709,7 +672,6 @@ d <- data.frame(ymin = ymin, ymax = yy,
                 xmin = xmin,
                 xmax = xmax,
                 col = col[unique(inv)])
-
 pseg_ht <- pseg + geom_rect(
   aes_(xmin = ~xmin,xmax = ~xmax,
        ymin = ~ymin,ymax = ~ymax,
@@ -717,7 +679,6 @@ pseg_ht <- pseg + geom_rect(
   data = d,
   alpha = 0.8,
   inherit.aes = FALSE)
-
 pseg_ht
 
 # add gene rank
@@ -753,7 +714,7 @@ pall <- aplot::plot_list(gglist = list(pcurve,pseg_ht1,prank),
 
 pall
 
-ggsave("../03.Output/04.IM_MO/GSEA_up_1_original;.pdf", width =3.4, height =3)
+ggsave("../03.Output/04.IM_MO/GSEA_up_1.pdf", width =3.4, height =3)
 
 ```
 
